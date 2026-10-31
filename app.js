@@ -458,3 +458,6 @@
   render();
   if (S && S.user() && navigator.onLine !== false) reconcile(false);
 })();
+
+// offline support (registered here so the page needs no inline script)
+if ('serviceWorker' in navigator) { window.addEventListener('load', function () { try { navigator.serviceWorker.register('sw.js').catch(function () {}); } catch (e) {} }); }
