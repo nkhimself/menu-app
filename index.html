@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>قیمت‌گذار منو</title>
+<link rel="stylesheet" href="style.css">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1f6f5c">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+</head>
+<body>
+<header>
+  <h1>قیمت‌گذار منو <small id="syncstat"></small></h1>
+  <nav id="tabs">
+    <button data-tab="qs" class="on">شروع سریع</button>
+    <button data-tab="chg">چه تغییر کرد</button>
+    <button data-tab="ing">مواد اولیه</button>
+    <button data-tab="menu">منو</button>
+    <button data-tab="sub">جایگزین‌ها</button>
+    <button data-tab="res">نتیجه</button>
+    <button data-tab="set">تنظیمات</button>
+    <button data-tab="acc">حساب</button>
+  </nav>
+</header>
+<main id="view"></main>
+<script src="config.js"></script>
+<script src="sync.js"></script>
+<script src="logic.js"></script>
+<script src="templates.js"></script>
+<script src="app.js"></script>
+<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){try{navigator.serviceWorker.register("sw.js")}catch(e){}})}</script>
+</body>
+</html>
