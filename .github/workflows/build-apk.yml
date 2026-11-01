@@ -21,7 +21,7 @@ jobs:
       - name: Collect the website files
         run: |
           mkdir -p build/www
-          cp index.html app.js logic.js sync.js config.js templates.js sw.js style.css manifest.json icon-192.png icon-512.png build/www/
+          cp index.html app.js logic.js sync.js config.js templates.js sw.js style.css vazirmatn.woff2 manifest.json icon-192.png icon-512.png build/www/
 
       - name: Create the Android project
         working-directory: build
