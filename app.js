@@ -34,90 +34,123 @@
   var UNIT = { kg: 'هر کیلوگرم', l: 'هر لیتر', piece: 'هر عدد' };
   var AMT = { kg: 'گرم', l: 'میلی‌لیتر', piece: 'عدد' };
 
+
+  // ---------- small UI helpers ----------
+  var TITLES = { qs: 'شروع سریع', res: 'نتیجه و پیشنهاد', chg: 'ثبت قیمت جدید', ing: 'مواد اولیه', menu: 'منوی غذاها', sub: 'جایگزین‌ها', set: 'تنظیمات', acc: 'حساب' };
+  function ICON(n) { return '<svg class="ico" aria-hidden="true"><use href="#i-' + n + '"/></svg>'; }
+  function lead(t, sub) { return '<div class="lead"><h2>' + t + '</h2>' + (sub ? '<p>' + sub + '</p>' : '') + '</div>'; }
+  // number input; hint = show the formatted amount under it (for toman prices)
+  function numField(f, val, extra, hint) {
+    var v = (val == null) ? '' : val;
+    return '<div class="fld"><input type="number" min="0" inputmode="decimal" data-f="' + f + '"' + (extra || '') + ' value="' + v + '">' +
+      (hint ? '<span class="hint">' + (Number(val) > 0 ? fmt(Number(val)) : '') + '</span>' : '') + '</div>';
+  }
+  function empty(title, text, actions) {
+    var plate = '<svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="64" r="40" fill="var(--surface2)"/><circle cx="60" cy="64" r="27" fill="none" stroke="var(--line)" stroke-width="3"/><path d="M18 22v20a5 5 0 0 0 10 0V22M23 22v58M98 22c-8 6-10 18-8 30h8V22zM98 52v28" stroke="var(--mute)" stroke-width="3" fill="none" stroke-linecap="round"/><circle cx="60" cy="64" r="9" fill="var(--saffron)"/></svg>';
+    return '<div class="sec empty">' + plate + '<h3>' + title + '</h3><p>' + text + '</p>' +
+      (actions || []).map(function (a) { return '<button class="btn block' + (a[2] ? ' pri' : '') + '" data-act="' + a[0] + '">' + a[1] + '</button>'; }).join('') + '</div>';
+  }
+  function unitOpts(sel) {
+    return [['kg', 'کیلوگرم'], ['l', 'لیتر'], ['piece', 'عدد']].map(function (u) { return '<option value="' + u[0] + '"' + (u[0] === sel ? ' selected' : '') + '>' + u[1] + '</option>'; }).join('');
+  }
+
   // ---------- views ----------
   function viewIng() {
-    var h = '<div class="card"><h2>مواد اولیه و قیمت امروز</h2><p class="mute">هر وقت قیمتی عوض شد، فقط همین‌جا عدد را اصلاح کنید؛ بقیه خودکار حساب می‌شود.</p>';
+    var h = lead('قیمت امروز مواد', 'هر وقت قیمتی عوض شد، همین‌جا عدد را اصلاح کنید؛ بقیه خودکار حساب می‌شود.');
+    if (!state.ingredients.length) return h + empty('هنوز ماده‌ای ندارید', 'با «شروع سریع» در دو دقیقه آماده شوید، یا مواد را یکی‌یکی وارد کنید.', [['go-qs', 'شروع سریع', true], ['ing-add', 'افزودن ماده'], ['demo', 'نمونهٔ آماده را ببینم']]);
     state.ingredients.forEach(function (g) {
-      h += '<div class="row" data-id="' + g.id + '">' +
-        '<input class="name" data-f="ing-name" value="' + esc(g.name) + '" placeholder="نام ماده">' +
-        '<select data-f="ing-unit"><option value="kg"' + (g.unit === 'kg' ? ' selected' : '') + '>کیلوگرم</option><option value="l"' + (g.unit === 'l' ? ' selected' : '') + '>لیتر</option><option value="piece"' + (g.unit === 'piece' ? ' selected' : '') + '>عدد</option></select>' +
-        '<input type="number" min="0" data-f="ing-price" value="' + g.price + '" title="' + UNIT[g.unit] + '">' +
-        '<label><input type="checkbox" data-f="ing-trim"' + (g.trimmable !== false ? ' checked' : '') + '> قابل کم‌کردن</label>' +
-        '<button class="x" data-act="ing-del" title="حذف">×</button></div>';
-      if (g.prevPrice != null && g.prevPrice !== g.price) h += '<div class="mute" style="margin:-4px 0 8px">قیمت قبلی: ' + fmt(g.prevPrice) + ' ← ' + fmt(g.price) + ' (' + pct((g.price / g.prevPrice - 1) * 100) + ')</div>';
+      var ch = '';
+      if (g.prevPrice != null && g.prevPrice !== g.price && g.prevPrice > 0) { var p = (g.price / g.prevPrice - 1) * 100; ch = '<span class="chg ' + (p > 0 ? 'up' : 'down') + '">' + (p > 0 ? '+' : '') + pct(p) + '</span> <span class="mute sm">قبلاً ' + fmt(g.prevPrice) + '</span>'; }
+      h += '<div class="item" data-id="' + g.id + '">' +
+        '<div class="rowx"><div class="grow"><input data-f="ing-name" value="' + esc(g.name) + '" placeholder="نام ماده" aria-label="نام ماده"></div><button class="x" data-act="ing-del" aria-label="حذف ماده">' + ICON('trash') + '</button></div>' +
+        '<div class="grid2" style="margin-top:8px"><div><span class="lbl">واحد خرید</span><select data-f="ing-unit" aria-label="واحد">' + unitOpts(g.unit) + '</select></div>' +
+        '<div><span class="lbl">' + UNIT[g.unit] + '</span>' + numField('ing-price', g.price, ' aria-label="قیمت"', true) + '</div></div>' +
+        '<div class="rowx" style="margin-top:4px;align-items:center;justify-content:space-between"><label class="switch"><input type="checkbox" data-f="ing-trim"' + (g.trimmable !== false ? ' checked' : '') + '> مقدارش قابل کم‌کردن باشد</label><span>' + ch + '</span></div></div>';
     });
-    h += '<button class="btn pri" data-act="ing-add">+ ماده جدید</button></div>';
-    if (!state.ingredients.length) h += '<div class="card"><button class="btn" data-act="demo">بارگذاری نمونهٔ پیتزا و ساندویچ</button></div>';
+    h += '<button class="btn pri block" data-act="ing-add">' + ICON('plus') + 'ماده جدید</button>';
     return h;
   }
 
   function viewMenu() {
-    var h = '';
+    var h = lead('غذاهای شما', 'برای هر غذا بنویسید چه موادی و چقدر در آن می‌رود. مقدارها را به گرم، میلی‌لیتر یا عدد بنویسید.');
+    if (!state.ingredients.length) return h + empty('اول مواد را وارد کنید', 'غذاها از روی مواد اولیه ساخته می‌شوند.', [['go-qs', 'شروع سریع', true], ['go-ing', 'رفتن به مواد اولیه']]);
+    var map = L.buildMap(state), tg = state.settings.targetFC;
     state.items.forEach(function (it) {
-      h += '<div class="card" data-id="' + it.id + '"><div class="row">' +
-        '<input class="name" data-f="it-name" value="' + esc(it.name) + '" placeholder="نام آیتم (مثلاً پیتزا مارگاریتا)">' +
-        '<label>قیمت فروش <input type="number" min="0" data-f="it-price" value="' + it.price + '"></label>' +
-        '<label>فروش ماهانه (اختیاری) <input type="number" min="0" data-f="it-sales" value="' + (it.sales || '') + '"></label>' +
-        '<button class="x" data-act="it-del" title="حذف آیتم">×</button></div>';
+      var cost = L.itemCost(it, map), fc = it.price > 0 ? cost / it.price * 100 : 0;
+      h += '<div class="item" data-id="' + it.id + '">' +
+        '<div class="rowx"><div class="grow"><input data-f="it-name" value="' + esc(it.name) + '" placeholder="نام غذا، مثلاً پیتزا مخصوص" aria-label="نام غذا"></div><button class="x" data-act="it-del" aria-label="حذف غذا">' + ICON('trash') + '</button></div>' +
+        '<div class="grid2" style="margin-top:8px"><div><span class="lbl">قیمت فروش</span>' + numField('it-price', it.price, ' aria-label="قیمت فروش"', true) + '</div>' +
+        '<div><span class="lbl">فروش ماهانه (اختیاری)</span>' + numField('it-sales', it.sales || '', ' aria-label="فروش ماهانه"') + '</div></div>';
+      if (it.price > 0 && it.lines.length) h += '<div class="gnote" style="margin:4px 2px 8px"><span>هزینهٔ مواد: <b>' + fmt(cost) + '</b></span><span class="pill ' + (fc > tg ? 'bad' : 'ok') + '">' + pct(fc) + '</span></div>';
       (it.lines || []).forEach(function (l, idx) {
-        var g = state.ingredients.filter(function (x) { return x.id === l.ingId; })[0];
-        h += '<div class="row" data-line="' + idx + '"><select data-f="ln-ing">' + ingOptions(l.ingId) + '</select>' +
-          '<input type="number" min="0" data-f="ln-amt" value="' + l.amount + '"> <span class="mute">' + (g ? AMT[g.unit] : '') + '</span>' +
-          '<button class="x" data-act="ln-del">×</button></div>';
+        var g = find(state.ingredients, l.ingId);
+        h += '<div class="line" data-line="' + idx + '"><select data-f="ln-ing" aria-label="ماده">' + ingOptions(l.ingId) + '</select>' +
+          numField('ln-amt', l.amount, ' aria-label="مقدار"') + '<span class="u">' + (g ? AMT[g.unit] : '') + '</span>' +
+          '<button class="x" data-act="ln-del" aria-label="حذف ماده از غذا">' + ICON('close') + '</button></div>';
       });
-      h += '<button class="btn" data-act="ln-add">+ ماده در این آیتم</button></div>';
+      h += '<button class="btn sm" data-act="ln-add">' + ICON('plus') + 'ماده در این غذا</button></div>';
     });
-    h += '<button class="btn pri" data-act="it-add">+ آیتم جدید</button>';
-    if (!state.ingredients.length) h = '<div class="note">اول در بخش «مواد اولیه» مواد را وارد کنید.</div>' + h;
+    h += '<button class="btn pri block" data-act="it-add">' + ICON('plus') + 'غذای جدید</button>';
     return h;
   }
 
   function viewSub() {
-    var h = '<div class="card"><h2>جایگزین‌های مجاز</h2><p class="mute">مثلاً «به‌جای ۵۰٪ پنیر پیتزا، پنیر پروسسی بگذارم». برنامه فقط از جایگزین‌هایی استفاده می‌کند که شما تأیید کرده‌اید.</p>';
+    var h = lead('جایگزین‌های مجاز', 'مثلاً «به‌جای بخشی از پنیر پیتزا، پنیر پروسسی بگذارم». برنامه فقط از جایگزین‌هایی استفاده می‌کند که شما تأیید کرده‌اید.');
+    if (!state.subs.length) h += '<div class="note">هنوز جایگزینی تعریف نشده است. بدون آن، پیشنهادها فقط بالا بردن قیمت یا کم‌کردن مقدار مواد است.</div>';
     state.subs.forEach(function (s) {
-      h += '<div class="row" data-id="' + s.id + '"><select data-f="sb-from">' + ingOptions(s.fromId) + '</select> ← <select data-f="sb-to">' + ingOptions(s.toId) + '</select>' +
-        '<label>نسبت مقدار <input type="number" step="0.1" min="0" data-f="sb-ratio" value="' + s.ratio + '"></label>' +
-        '<label>حداکثر سهم (٪) <input type="number" min="0" max="100" data-f="sb-share" value="' + s.maxShare + '"></label>' +
-        '<button class="x" data-act="sb-del">×</button></div>';
+      h += '<div class="item" data-id="' + s.id + '"><div class="rowx"><div class="grow stack">' +
+        '<div><span class="lbl">به‌جای</span><select data-f="sb-from">' + ingOptions(s.fromId) + '</select></div>' +
+        '<div><span class="lbl">این را بگذار</span><select data-f="sb-to">' + ingOptions(s.toId) + '</select></div></div>' +
+        '<button class="x" data-act="sb-del" aria-label="حذف جایگزین">' + ICON('trash') + '</button></div>' +
+        '<div class="grid2" style="margin-top:10px"><div><span class="lbl">نسبت مقدار</span>' + numField('sb-ratio', s.ratio, ' step="0.1"') + '</div>' +
+        '<div><span class="lbl">حداکثر سهم (٪)</span>' + numField('sb-share', s.maxShare, ' max="100"') + '</div></div></div>';
     });
-    h += '<button class="btn pri" data-act="sb-add">+ جایگزین جدید</button></div>';
+    h += '<button class="btn pri block" data-act="sb-add">' + ICON('plus') + 'جایگزین جدید</button>';
     return h;
   }
 
   function viewRes() {
-    var map = L.buildMap(state), h = '';
-    var s = state.settings;
-    if (!state.items.length) return '<div class="note">هنوز آیتمی وارد نشده است.</div>';
-    h += '<p class="mute">هدف هزینهٔ مواد: ' + s.targetFC + '٪ قیمت فروش. ' + 'اگر «فروش ماهانه» وارد کرده باشید، سود ماهانه هم مقایسه می‌شود.</p>';
-    state.items.forEach(function (it) {
-      var r = L.scenarios(it, map, s, state.subs);
-      h += '<div class="card"><div class="row"><h2 style="margin:0;flex:1">' + esc(it.name || '(بدون نام)') + '</h2>' +
-        '<span class="badge ' + (r.over ? 'bad' : 'ok') + '">هزینهٔ مواد ' + pct(r.fc * 100) + '</span></div>' +
-        '<div class="mute">هزینهٔ مواد: ' + fmt(r.cost) + ' — قیمت فروش: ' + fmt(it.price) + '</div>';
-      var ex = r.explain;
-      if (ex.length && ex[0].delta > 0) h += '<div class="note">بیشترین اثر: ' + esc(ex[0].name) + ' (' + pct(ex[0].pct) + ' گران‌تر شده؛ +' + fmt(ex[0].delta) + ' برای هر واحد)</div>';
-      if (!r.over) { h += '<p>در محدودهٔ هدف است؛ تغییری لازم نیست.</p></div>'; return; }
-      var unit = r.hasSales ? 'سود ماهانه' : 'سود هر واحد';
-      var names = { nothing: 'تغییر نمی‌دهم', raise: 'قیمت را بالا می‌برم', keep: 'قیمت را نگه می‌دارم و مواد را اصلاح می‌کنم' };
-      h += '<table><tr><th>گزینه</th><th>قیمت</th><th>هزینه</th><th>' + unit + '</th></tr>';
-      ['nothing', 'raise', 'keep'].forEach(function (k) {
-        var x = r.scenarios[k];
-        h += '<tr' + (r.best === k ? ' class="best"' : '') + '><td>' + names[k] + (r.best === k ? ' ✓' : '') + '</td><td class="n">' + fmt(x.price) + '</td><td class="n">' + fmt(x.cost) + '</td><td class="n">' + fmt(x.profit) + '</td></tr>';
-      });
-      h += '</table>';
-      if (r.plan.actions.length) {
-        h += '<div><b>اگر قیمت را نگه دارید:</b><ul>';
-        r.plan.actions.forEach(function (a) {
-          if (a.type === 'swap') h += '<li>' + Math.round(a.amountFrom) + ' از «' + esc(a.fromName) + '» (' + pct(a.percent) + ' آن) را با ' + Math.round(a.amountTo) + ' از «' + esc(a.toName) + '» عوض کنید؛ صرفه‌جویی ' + fmt(a.saving) + ' برای هر واحد</li>';
-          else h += '<li>«' + esc(a.name) + '» را ' + pct(a.percent) + ' کم کنید (از ' + Math.round(a.amountFrom) + ' به ' + Math.round(a.amountTo) + ')؛ صرفه‌جویی ' + fmt(a.saving) + ' برای هر واحد</li>';
+    var map = L.buildMap(state), s = state.settings, tgt = s.targetFC / 100;
+    if (!state.items.length) return lead('اینجا پیشنهاد قیمت می‌بینید', 'اول غذاها و قیمت موادشان را وارد کنید.') + empty('هنوز غذایی ندارید', 'در دو دقیقه چند غذای پرفروش را بسازید تا ببینید کدام سود کمتری دارد.', [['go-qs', 'شروع سریع', true], ['demo', 'نمونهٔ آماده را ببینم']]);
+    var rows = state.items.map(function (it) { return { it: it, r: L.scenarios(it, map, s, state.subs) }; });
+    rows.sort(function (a, b) { return ((b.r.over ? 1 : 0) - (a.r.over ? 1 : 0)) || ((isFinite(b.r.fc) ? b.r.fc : 0) - (isFinite(a.r.fc) ? a.r.fc : 0)); });
+    var nOver = rows.filter(function (x) { return x.r.over; }).length;
+    var h = lead(nOver ? nOver + ' غذا از هدف هزینه بالاتر رفته' : 'همهٔ غذاها در محدودهٔ هدف‌اند', 'هدف شما: هزینهٔ مواد ' + s.targetFC + '٪ قیمت فروش');
+    var names = { nothing: 'تغییر نمی‌دهم', raise: 'قیمت را بالا می‌برم', keep: 'قیمت را نگه می‌دارم و مواد را اصلاح می‌کنم' };
+    rows.forEach(function (x) {
+      var it = x.it, r = x.r, fc = isFinite(r.fc) ? r.fc : 0;
+      var scale = Math.max(tgt * 1.7, fc * 1.05, 0.01), w = Math.min(fc / scale, 1) * 100, tp = tgt / scale * 100;
+      var unit = r.hasSales ? 'سود ماهانه' : 'سود هر واحد', ex = r.explain;
+      h += '<article class="dish' + (r.over ? ' over' : '') + '">' +
+        '<div class="leader"><span class="nm">' + esc(it.name || '(بدون نام)') + '</span><span class="dots"></span><span class="pr">' + fmt(it.price) + '</span></div>' +
+        '<div class="gauge' + (r.over ? ' over' : '') + '" role="img" aria-label="هزینهٔ مواد ' + pct(fc * 100) + ' از قیمت فروش"><i style="width:' + w.toFixed(1) + '%"></i><u style="right:' + tp.toFixed(1) + '%"></u></div>' +
+        '<div class="gnote"><span>هزینهٔ مواد <b>' + pct(fc * 100) + '</b> (' + fmt(r.cost) + ')</span><span>هدف ' + s.targetFC + '٪</span></div>';
+      if (!r.over) {
+        h += '<div class="okline">' + ICON('check') + 'در محدودهٔ هدف است؛ تغییری لازم نیست.</div>';
+      } else {
+        var b = r.scenarios[r.best], head = r.best === 'raise' ? 'قیمت را به ' + fmt(b.price) + ' برسانید' : r.best === 'keep' ? 'قیمت را نگه دارید و مواد را اصلاح کنید' : 'تغییر ندهید؛ با افت فروش احتمالی، سود بهتری ندارد';
+        h += '<div class="ticket"><b>' + head + '</b><span>' + unit + ': ' + fmt(b.profit) + (r.best !== 'nothing' ? ' (بدون تغییر: ' + fmt(r.scenarios.nothing.profit) + ')' : '') + '</span></div>';
+        if (ex.length && ex[0].delta > 0) h += '<p class="cause">بیشترین علت: ' + esc(ex[0].name) + '، ' + pct(ex[0].pct) + ' گران‌تر شده (+' + fmt(ex[0].delta) + ' برای هر واحد)</p>';
+        h += '<details><summary>همهٔ گزینه‌ها و جزئیات</summary>';
+        ['nothing', 'raise', 'keep'].forEach(function (k) {
+          var o = r.scenarios[k];
+          h += '<div class="opt' + (r.best === k ? ' best' : '') + '"><div class="t">' + names[k] + (r.best === k ? ' ✓' : '') + '</div>' +
+            '<div><span class="k">قیمت</span><span class="v">' + fmt(o.price) + '</span></div><div><span class="k">هزینه</span><span class="v">' + fmt(o.cost) + '</span></div><div><span class="k">' + unit + '</span><span class="v">' + fmt(o.profit) + '</span></div></div>';
         });
-        h += '</ul>';
-        if (r.plan.needsPriceRise) h += '<div class="note">این کم‌کردن‌ها کافی نیست؛ برای رسیدن به هدف قیمت باید حداقل ' + fmt(r.plan.priceNeeded) + ' شود.</div>';
-        h += '</div>';
-      } else if (r.plan.needsPriceRise) h += '<div class="note">جایگزین یا کم‌کردن مجازی تعریف نشده است؛ فقط افزایش قیمت باقی می‌ماند.</div>';
-      h += '</div>';
+        if (r.plan.actions.length) {
+          h += '<p style="margin:12px 0 2px"><b>اگر قیمت را نگه دارید:</b></p><ul class="plan">';
+          r.plan.actions.forEach(function (a) {
+            if (a.type === 'swap') h += '<li>' + Math.round(a.amountFrom) + ' از «' + esc(a.fromName) + '» (' + pct(a.percent) + ' آن) را با ' + Math.round(a.amountTo) + ' از «' + esc(a.toName) + '» عوض کنید؛ صرفه‌جویی ' + fmt(a.saving) + ' برای هر واحد</li>';
+            else h += '<li>«' + esc(a.name) + '» را ' + pct(a.percent) + ' کم کنید (از ' + Math.round(a.amountFrom) + ' به ' + Math.round(a.amountTo) + ')؛ صرفه‌جویی ' + fmt(a.saving) + ' برای هر واحد</li>';
+          });
+          h += '</ul>';
+          if (r.plan.needsPriceRise) h += '<div class="note warn">این کم‌کردن‌ها کافی نیست؛ برای رسیدن به هدف، قیمت باید حداقل ' + fmt(r.plan.priceNeeded) + ' شود.</div>';
+        } else if (r.plan.needsPriceRise) h += '<div class="note warn">جایگزین یا کم‌کردن مجازی تعریف نشده است؛ فقط افزایش قیمت باقی می‌ماند.</div>';
+        h += '</details>';
+      }
+      h += '</article>';
     });
-    h += '<div class="note">پیشنهادها تقریبی‌اند. افت فروش با ضریب حساسیت ' + s.elasticity + ' فرض شده و باید با فروش واقعی خودتان اصلاح شود؛ تغییر مواد را قبل از اجرا خودتان تأیید کنید.</div>';
+    h += '<div class="note">پیشنهادها تقریبی‌اند. افت فروش با ضریب حساسیت ' + s.elasticity + ' فرض شده و باید با فروش واقعی خودتان اصلاح شود. تغییر مواد را قبل از اجرا خودتان تأیید کنید.</div>';
     return h;
   }
 
@@ -130,32 +163,32 @@
   }
   function viewQs() {
     if (qs.t0 == null) qs.t0 = Date.now();
-    var h = '<div class="card"><h2>شروع سریع (حدود دو دقیقه)</h2><p class="mute">۱) غذاهای خود را انتخاب کنید ۲) قیمت مواد و قیمت فروش را بنویسید ۳) نتیجه را ببینید. مقدارهای هر غذا نمونهٔ تقریبی است و بعداً در بخش «منو» اصلاح می‌شود.</p>';
-    h += '<h2 style="margin-top:12px">۱) غذاها</h2><div class="row">';
+    var need = qsNeeded(), picked = T.dishes.some(function (d) { return qs.dishes[d.id]; });
+    var h = lead('در دو دقیقه آماده شوید', 'غذاهایتان را انتخاب کنید، قیمت‌ها را بنویسید و نتیجه را ببینید. مقدار مواد هر غذا نمونهٔ تقریبی است و بعداً در «منوی غذاها» اصلاح می‌شود.');
+    h += '<div class="steps"><i class="on"></i><i class="' + (picked ? 'on' : '') + '"></i><i></i></div>';
+    h += '<div class="sec"><h3>چه غذاهایی می‌فروشید؟</h3><div class="tile-grid" style="margin-top:10px">';
     T.dishes.forEach(function (d) {
-      h += '<label class="chip"><input type="checkbox" data-f="qs-dish" data-k="' + d.id + '"' + (qs.dishes[d.id] ? ' checked' : '') + '> ' + esc(d.name) + '</label>';
+      h += '<label class="tile"><input type="checkbox" data-f="qs-dish" data-k="' + d.id + '"' + (qs.dishes[d.id] ? ' checked' : '') + '><span class="ck">' + ICON('check') + '</span>' + esc(d.name) + '</label>';
     });
-    h += '</div>';
-    var need = qsNeeded();
+    h += '</div></div>';
     if (need.length) {
-      h += '<h2 style="margin-top:12px">۲) قیمت مواد (آخرین قیمت خرید شما، به تومان)</h2>';
+      h += '<div class="sec"><h3>قیمت مواد</h3><p class="mute">آخرین قیمت خرید شما، به تومان</p>';
       need.forEach(function (k) {
         var c = T.catalog[k], ex = state.ingredients.filter(function (g) { return g.name === c.name; })[0];
         var v = qs.prices[k] != null ? qs.prices[k] : (ex ? ex.price : '');
-        h += '<div class="row"><label style="flex:1">' + esc(c.name) + ' <span class="mute">(' + UNIT[c.unit] + ')</span></label><input type="number" min="0" inputmode="numeric" data-f="qs-price" data-k="' + k + '" value="' + v + '"></div>';
+        h += '<div class="setrow"><div class="tx"><b>' + esc(c.name) + '</b><span class="mute sm">' + UNIT[c.unit] + '</span></div>' + numField('qs-price', v, ' data-k="' + k + '" aria-label="' + esc(c.name) + '"', true) + '</div>';
       });
-      h += '<h2 style="margin-top:12px">قیمت فروش هر غذا (تومان)</h2>';
+      h += '</div><div class="sec"><h3>قیمت فروش هر غذا</h3><p class="mute">به تومان</p>';
       T.dishes.forEach(function (d) {
         if (!qs.dishes[d.id]) return;
         var ex = state.items.filter(function (it) { return it.name === d.name; })[0];
         var v = qs.sell[d.id] != null ? qs.sell[d.id] : (ex ? ex.price : '');
-        h += '<div class="row"><label style="flex:1">' + esc(d.name) + '</label><input type="number" min="0" inputmode="numeric" data-f="qs-sell" data-k="' + d.id + '" value="' + v + '"></div>';
+        h += '<div class="setrow"><div class="tx"><b>' + esc(d.name) + '</b></div>' + numField('qs-sell', v, ' data-k="' + d.id + '" aria-label="' + esc(d.name) + '"', true) + '</div>';
       });
-      h += '<button class="btn pri" data-act="qs-go">محاسبه و نمایش نتیجه</button>';
-    } else h += '<p class="mute">حداقل یک غذا را انتخاب کنید.</p>';
-    h += '</div>';
-    if (state.meta.setupSeconds != null) h += '<p class="mute">آخرین راه‌اندازی: ' + Math.round(state.meta.setupSeconds) + ' ثانیه</p>';
-    h += '<div class="card"><p class="mute">غذای شما در فهرست نیست؟ از بخش «منو» خودتان اضافه کنید.</p><button class="btn" data-act="demo">نمونهٔ آماده را ببینم</button></div>';
+      h += '</div><button class="btn pri block" data-act="qs-go">محاسبه و نمایش نتیجه</button>';
+    } else h += '<p class="mute" style="text-align:center">حداقل یک غذا را انتخاب کنید.</p>';
+    if (state.meta.setupSeconds != null) h += '<p class="mute sm" style="text-align:center;margin-top:12px">آخرین راه‌اندازی: ' + Math.round(state.meta.setupSeconds) + ' ثانیه</p>';
+    h += '<div class="sec" style="margin-top:16px"><p class="mute" style="margin:0 0 10px">غذایتان در فهرست نیست؟ از «منوی غذاها» خودتان اضافه کنید.</p><button class="btn block" data-act="demo">نمونهٔ آماده را ببینم</button></div>';
     return h;
   }
   function qsApply() {
@@ -186,25 +219,30 @@
 
   // ---------- what changed ----------
   function viewChg() {
-    var h = '<div class="card"><h2>قیمت‌های جدید را وارد کنید</h2><p class="mute">فقط قیمت موادی را که عوض شده بنویسید و یک بار «ثبت» را بزنید. بقیه را خالی بگذارید.</p>';
-    if (!state.ingredients.length) return '<div class="note">اول از «شروع سریع» مواد را وارد کنید.</div>';
+    var h = lead('قیمت‌ها عوض شد؟', 'فقط قیمت موادی را که عوض شده بنویسید و یک بار «ثبت» را بزنید. بقیه را خالی بگذارید.');
+    if (!state.ingredients.length) return h + empty('هنوز ماده‌ای ندارید', 'اول مواد را وارد کنید.', [['go-qs', 'شروع سریع', true]]);
+    h += '<div class="sec">';
     state.ingredients.forEach(function (g) {
-      h += '<div class="row"><label style="flex:1">' + esc(g.name) + ' <span class="mute">(الان ' + fmt(g.price) + ')</span></label><input type="number" min="0" inputmode="numeric" data-f="up-price" data-k="' + g.id + '" value="' + (upd[g.id] != null ? upd[g.id] : '') + '" placeholder="قیمت جدید"></div>';
+      h += '<div class="setrow"><div class="tx"><b>' + esc(g.name) + '</b><span class="mute sm">الان ' + fmt(g.price) + '</span></div>' + numField('up-price', upd[g.id] != null ? upd[g.id] : '', ' data-k="' + g.id + '" placeholder="قیمت جدید" aria-label="قیمت جدید ' + esc(g.name) + '"', true) + '</div>';
     });
-    h += '<button class="btn pri" data-act="up-go">ثبت قیمت‌های جدید</button></div>';
+    h += '<button class="btn pri block" style="margin-top:12px" data-act="up-go">ثبت قیمت‌های جدید</button></div>';
     var c = L.changes(state);
     if (!c.ingredients.length) return h + '<div class="note">هنوز تغییر قیمتی ثبت نشده است. بعد از ثبت قیمت جدید، اینجا می‌بینید چه چیزی گران شد و کدام غذاها را اذیت کرد.</div>';
-    h += '<div class="card"><h2>چه چیزی عوض شد</h2>';
+    h += '<div class="sec"><h3>چه چیزی عوض شد</h3>';
     c.ingredients.forEach(function (g) {
-      h += '<div class="row"><span style="flex:1">' + esc(g.name) + '</span><span class="mute">' + fmt(g.prev) + ' ← ' + fmt(g.now) + '</span><span class="badge ' + (g.pct > 0 ? 'bad' : 'ok') + '">' + '\u200e' + (g.pct > 0 ? '+' : '') + pct(g.pct) + '</span></div>';
+      h += '<div class="listrow"><div class="tx"><b>' + esc(g.name) + '</b><span class="mute sm" style="display:block">از ' + fmt(g.prev) + ' به ' + fmt(g.now) + '</span></div><span class="chg ' + (g.pct > 0 ? 'up' : 'down') + '">' + (g.pct > 0 ? '+' : '') + pct(g.pct) + '</span></div>';
     });
-    h += '</div><div class="card"><h2>اثر روی غذاها</h2><table><tr><th>غذا</th><th>هزینه</th><th>سهم هزینهٔ مواد</th><th>بیشترین علت</th></tr>';
+    h += '</div><div class="sec"><h3>اثر روی غذاها</h3>';
+    var any = false;
     c.items.forEach(function (x) {
-      if (Math.abs(x.delta) < 1e-9) return;
-      h += '<tr><td>' + esc(x.name) + (x.crossed ? ' <span class="badge bad">از هدف گذشت</span>' : '') + '</td><td class="n">' + fmt(x.costPrev) + ' ← ' + fmt(x.costNow) + '</td><td class="n">' + pct(x.fcPrev * 100) + ' ← ' + pct(x.fcNow * 100) + '</td><td>' + esc(x.cause) + '</td></tr>';
+      if (Math.abs(x.delta) < 1e-9) return; any = true;
+      h += '<div class="listrow"><div class="tx"><b>' + esc(x.name) + '</b>' + (x.crossed ? ' <span class="pill bad">از هدف گذشت</span>' : '') +
+        '<span class="mute sm" style="display:block">هزینه از ' + fmt(x.costPrev) + ' به ' + fmt(x.costNow) + ' · سهم مواد از ' + pct(x.fcPrev * 100) + ' به ' + pct(x.fcNow * 100) + '</span>' +
+        (x.cause ? '<span class="cause" style="display:block">بیشترین علت: ' + esc(x.cause) + '</span>' : '') + '</div></div>';
     });
-    h += '</table><p class="mute">برای دیدن پیشنهاد (بالا بردن قیمت یا اصلاح مواد) به بخش «نتیجه» بروید.</p></div>';
-    h += '<div class="card"><button class="btn" data-act="share">متن خلاصه برای ارسال به کارکنان یا شریک</button><div id="sharebox"></div></div>';
+    if (!any) h += '<p class="mute">قیمت غذاها تغییری نکرد.</p>';
+    h += '<p class="mute" style="margin-top:10px">برای دیدن پیشنهاد، به «نتیجه و پیشنهاد» بروید.</p></div>';
+    h += '<div class="sec"><button class="btn block" data-act="share">متن خلاصه برای کارکنان یا شریک</button><div id="sharebox"></div></div>';
     return h;
   }
   function shareText() {
@@ -224,20 +262,21 @@
 
   function viewSet() {
     var s = state.settings;
-    function f(key, label, hint) { return '<div class="row"><label style="flex:1">' + label + '<br><span class="mute">' + hint + '</span></label><input type="number" step="any" data-f="st-' + key + '" value="' + s[key] + '"></div>'; }
-    return '<div class="card"><h2>تنظیمات</h2>' +
-      f('targetFC', 'هدف هزینهٔ مواد (٪ قیمت فروش)', 'معمولاً بین ۲۸ تا ۳۵؛ برای خودتان تنظیم کنید') +
-      f('minPortion', 'حداقل مقدار مجاز نسبت به مقدار فعلی (٪)', 'مثلاً ۸۵ یعنی تا ۱۵٪ کم‌کردن مجاز است') +
-      f('roundTo', 'رند کردن قیمت به', 'مثلاً ۱۰۰۰ یا ۵۰۰۰ تومان') +
-      f('elasticity', 'حساسیت مشتری به گرانی', 'عدد ۱٫۲ یعنی ۱۰٪ گرانی ≈ ۱۲٪ کاهش فروش؛ فرض محتاطانه') +
+    function f(key, label, hint) { return '<div class="setrow"><div class="tx"><b>' + label + '</b><span class="mute sm">' + hint + '</span></div><div class="fld"><input type="number" step="any" inputmode="decimal" data-f="st-' + key + '" value="' + s[key] + '"></div></div>'; }
+    return lead('تنظیمات محاسبه', 'این عددها پیشنهادها را شکل می‌دهند؛ برای کسب‌وکار خودتان تنظیم کنید.') +
+      '<div class="sec">' +
+      f('targetFC', 'هدف هزینهٔ مواد (٪ قیمت فروش)', 'معمولاً بین ۲۸ تا ۳۵') +
+      f('minPortion', 'حداقل مقدار مجاز (٪ مقدار فعلی)', 'مثلاً ۸۵ یعنی تا ۱۵٪ کم‌کردن مجاز است') +
+      f('roundTo', 'رند کردن قیمت به (تومان)', 'مثلاً ۱۰۰۰ یا ۵۰۰۰') +
+      f('elasticity', 'حساسیت مشتری به گرانی', '۱٫۲ یعنی ۱۰٪ گرانی ≈ ۱۲٪ کاهش فروش') +
       f('qualityDrop', 'افت فروش بر اثر کم‌کردن مواد (٪)', 'اگر کیفیت کمی پایین بیاید') + '</div>' +
-      '<div class="card"><h2>داده</h2><div class="row">' +
-      '<button class="btn" data-act="export">دریافت پشتیبان (فایل)</button>' +
-      '<label class="btn">بازیابی از فایل<input type="file" accept=".json" data-f="import" hidden></label>' +
-      '<button class="btn" data-act="demo">نمونهٔ پیتزا و ساندویچ</button>' +
-      '<button class="btn" data-act="reset" style="color:var(--bad)">پاک‌کردن همه</button></div>' +
-      '<p class="mute">اگر وارد حساب نشده‌اید اطلاعات فقط روی همین دستگاه ذخیره می‌شود؛ حتماً گاهی پشتیبان بگیرید.</p></div>' +
-      '<div class="card"><h2>آمار استفاده (فقط روی همین دستگاه)</h2><p class="mute">زمان راه‌اندازی: ' + (state.meta.setupSeconds == null ? '—' : Math.round(state.meta.setupSeconds) + ' ثانیه') + ' — دفعات شروع سریع: ' + state.meta.setups + ' — دفعات ثبت قیمت جدید: ' + state.meta.priceUpdates + '</p></div>';
+      '<div class="sec stack"><h3>اطلاعات</h3>' +
+      '<button class="btn block" data-act="export">دریافت پشتیبان (فایل)</button>' +
+      '<label class="btn block">بازیابی از فایل<input type="file" accept=".json" data-f="import" hidden></label>' +
+      '<button class="btn block" data-act="demo">نمونهٔ پیتزا و ساندویچ</button>' +
+      '<button class="btn block danger" data-act="reset">پاک‌کردن همه</button>' +
+      '<p class="mute sm">اگر وارد حساب نشده‌اید، اطلاعات فقط روی همین دستگاه می‌ماند؛ گاهی پشتیبان بگیرید.</p></div>' +
+      '<div class="sec"><h3>آمار استفاده</h3><p class="mute" style="margin:0">فقط روی همین دستگاه. زمان راه‌اندازی: ' + (state.meta.setupSeconds == null ? '—' : Math.round(state.meta.setupSeconds) + ' ثانیه') + '، دفعات شروع سریع: ' + state.meta.setups + '، دفعات ثبت قیمت جدید: ' + state.meta.priceUpdates + '</p></div>';
   }
 
   // ---------- account + cloud ----------
@@ -247,9 +286,10 @@
   function setCloud(kind, msg) { cloud.kind = kind; cloud.msg = msg; paintStat(); if (tab === 'acc') render(); }
   function paintStat() {
     var el = document.getElementById('syncstat'); if (!el) return;
-    if (!S || !S.user()) { el.textContent = ''; return; }
+    var who = document.getElementById('who'); if (who) who.textContent = (S && S.user()) ? (S.user().email || '') : 'بدون حساب';
+    if (!S || !S.user()) { el.textContent = ''; el.className = 'sync'; return; }
     var t = cloud.conflict ? '⚠ تداخل داده' : cloud.busy ? '… همگام‌سازی' : cloud.kind === 'err' ? '⚠ بدون اتصال' : (S.meta().dirty ? '● ذخیره‌نشده در ابر' : '✓ ذخیره در ابر');
-    el.textContent = t; el.className = cloud.conflict || cloud.kind === 'err' ? 'bad' : '';
+    el.textContent = t; el.className = 'sync' + (cloud.conflict || cloud.kind === 'err' ? ' bad' : '');
   }
   function profile() { var m = S.meta(); return { city: m.city || '', share: !!m.share }; }
   function scheduleSync() { clearTimeout(cloud.timer); paintStat(); cloud.timer = setTimeout(function () { syncNow(false); }, 1500); }
@@ -296,28 +336,28 @@
   }
   function viewAcc() {
     var h = '';
-    if (!S || !S.configured()) return '<div class="card"><p class="mute">اتصال به سرور تنظیم نشده است.</p></div>';
+    if (!S || !S.configured()) return lead('حساب', '') + '<div class="note">اتصال به سرور تنظیم نشده است.</div>';
     var u = S.user();
     if (!u) {
-      h += '<div class="card"><h2>ورود یا ثبت‌نام</h2><p class="mute">بدون حساب هم می‌توانید از برنامه استفاده کنید (اطلاعات فقط روی همین گوشی می‌ماند). با حساب، اطلاعات شما در ابر هم ذخیره می‌شود و با عوض‌کردن گوشی از دست نمی‌رود.</p>' +
-        '<div class="row"><input id="acc-email" type="email" dir="ltr" placeholder="ایمیل" autocomplete="username" style="flex:1 1 200px"></div>' +
-        '<div class="row"><input id="acc-pass" type="password" dir="ltr" placeholder="رمز عبور (حداقل ۸ کاراکتر)" autocomplete="current-password" style="flex:1 1 200px"></div>' +
-        '<div class="row"><button class="btn pri" data-act="acc-in">ورود</button><button class="btn" data-act="acc-up">ثبت‌نام</button></div>' +
+      h += lead('اطلاعاتتان گم نشود', 'بدون حساب هم می‌توانید کار کنید، اما اطلاعات فقط روی همین گوشی می‌ماند. با حساب، اطلاعات در ابر ذخیره می‌شود و با عوض‌کردن گوشی از بین نمی‌رود.');
+      h += '<div class="sec stack"><div><label class="lbl" for="acc-email">ایمیل</label><input id="acc-email" type="email" dir="ltr" autocomplete="username" placeholder="name@example.com"></div>' +
+        '<div><label class="lbl" for="acc-pass">رمز عبور (حداقل ۸ کاراکتر)</label><input id="acc-pass" type="password" dir="ltr" autocomplete="current-password"></div>' +
+        '<div class="grid2"><button class="btn pri" data-act="acc-in">ورود</button><button class="btn" data-act="acc-up">ثبت‌نام</button></div>' +
         (cloud.msg ? '<div class="note">' + esc(cloud.msg) + '</div>' : '') + '</div>';
     } else {
       var m = S.meta();
-      h += '<div class="card"><h2>حساب شما</h2><p dir="ltr" style="text-align:right">' + esc(u.email || '') + '</p>' +
-        '<p>' + (cloud.conflict ? '<span class="badge bad">تداخل داده</span>' : cloud.busy ? 'در حال همگام‌سازی…' : m.dirty ? 'تغییرات هنوز در ابر ذخیره نشده‌اند.' : '<span class="badge ok">همگام با ابر</span>') + '</p>' +
-        (cloud.msg ? '<p class="mute">' + esc(cloud.msg) + '</p>' : '') +
-        (cloud.conflict ? '<div class="row"><button class="btn" data-act="acc-usecloud">استفاده از نسخهٔ ابر</button><button class="btn" data-act="acc-usethis" style="color:var(--bad)">جایگزین‌کردن ابر با این دستگاه</button></div>' : '') +
-        '<div class="row"><button class="btn" data-act="acc-sync">همگام‌سازی الان</button><button class="btn" data-act="acc-out">خروج</button></div></div>' +
-        '<div class="card"><h2>مشخصات کسب‌وکار</h2>' +
-        '<div class="row"><label style="flex:1">شهر<br><input id="acc-city" value="' + esc(m.city || '') + '" placeholder="مثلاً مشهد" style="width:100%"></label></div>' +
-        '<label class="row"><input type="checkbox" id="acc-share"' + (m.share ? ' checked' : '') + '> <span>اجازه می‌دهم در آینده قیمت مواد من به‌صورت ناشناس برای مقایسهٔ قیمت بین مغازه‌ها استفاده شود <span class="mute">(در این نسخه هنوز هیچ دادهٔ شما با کسی به اشتراک گذاشته نمی‌شود)</span></span></label>' +
+      h += lead('حساب شما', '') + '<div class="sec stack"><p dir="ltr" style="margin:0;text-align:right;font-weight:700">' + esc(u.email || '') + '</p>' +
+        '<p style="margin:0">' + (cloud.conflict ? '<span class="pill bad">تداخل داده</span>' : cloud.busy ? 'در حال همگام‌سازی…' : m.dirty ? 'تغییرات هنوز در ابر ذخیره نشده‌اند.' : '<span class="pill ok">همگام با ابر</span>') + '</p>' +
+        (cloud.msg ? '<p class="mute" style="margin:0">' + esc(cloud.msg) + '</p>' : '') +
+        (cloud.conflict ? '<div class="grid2"><button class="btn" data-act="acc-usecloud">استفاده از نسخهٔ ابر</button><button class="btn danger" data-act="acc-usethis">جایگزین‌کردن ابر با این دستگاه</button></div>' : '') +
+        '<div class="grid2"><button class="btn" data-act="acc-sync">همگام‌سازی الان</button><button class="btn" data-act="acc-out">خروج</button></div></div>' +
+        '<div class="sec stack"><h3>مشخصات کسب‌وکار</h3>' +
+        '<div><label class="lbl" for="acc-city">شهر</label><input id="acc-city" value="' + esc(m.city || '') + '" placeholder="مثلاً مشهد"></div>' +
+        '<label class="switch" style="align-items:flex-start"><input type="checkbox" id="acc-share"' + (m.share ? ' checked' : '') + '> <span>اجازه می‌دهم در آینده قیمت مواد من ناشناس برای مقایسهٔ قیمت بین مغازه‌ها استفاده شود. در این نسخه هنوز هیچ دادهٔ شما با کسی به اشتراک گذاشته نمی‌شود.</span></label>' +
         '<button class="btn" data-act="acc-prof">ذخیرهٔ مشخصات</button></div>' +
-        '<div class="card"><h2>حذف اطلاعات ابری</h2><p class="mute">اطلاعات شما در ابر پاک می‌شود؛ نسخهٔ روی این گوشی می‌ماند. برای حذف کامل خود حساب، به ما پیام دهید.</p><button class="btn" data-act="acc-del" style="color:var(--bad)">حذف اطلاعات من از ابر</button></div>';
+        '<div class="sec stack"><h3>حذف اطلاعات ابری</h3><p class="mute" style="margin:0">اطلاعات شما در ابر پاک می‌شود؛ نسخهٔ روی این گوشی می‌ماند. برای حذف کامل خود حساب، به ما پیام دهید.</p><button class="btn danger" data-act="acc-del">حذف اطلاعات من از ابر</button></div>';
     }
-    h += '<div class="card"><h2>بررسی اتصال به سرور</h2><div class="row"><button class="btn" data-act="acc-check">بررسی اتصال</button></div><p class="mute" id="chk">' + (cloud.checked || '') + '</p></div>';
+    h += '<div class="sec stack"><h3>بررسی اتصال به سرور</h3><button class="btn" data-act="acc-check">بررسی اتصال</button><p class="mute" id="chk" style="margin:0">' + (cloud.checked || '') + '</p></div>';
     return h;
   }
   function accAct(act) {
@@ -354,15 +394,32 @@
     var v = document.getElementById('view');
     try { var ae = document.activeElement; if (ae && v.contains(ae) && ae.blur) ae.blur(); } catch (e) {}
     try { v.innerHTML = VIEWS[tab](); } finally { rendering = false; }
-    Array.prototype.forEach.call(document.querySelectorAll('#tabs button'), function (b) { b.className = b.getAttribute('data-tab') === tab ? 'on' : ''; });
+    Array.prototype.forEach.call(document.querySelectorAll('#tabs button'), function (b) { var on = b.getAttribute('data-tab') === tab; b.classList.toggle('on', on); if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+    var ti = document.getElementById('title'); if (ti) ti.textContent = TITLES[tab] || 'قیمت‌گذار منو';
+    var fb = document.getElementById('fab'); if (fb) fb.classList.toggle('show', tab === 'res' && state.items.length > 0);
   }
 
   // ---------- events ----------
   function closest(el, sel) { while (el && el.nodeType === 1) { if (el.matches(sel)) return el; el = el.parentNode; } return null; }
   function find(arr, id) { return arr.filter(function (x) { return x.id === id; })[0]; }
 
+  function drawer(open) {
+    document.body.classList.toggle('open', open);
+    var mb = document.getElementById('menuBtn'); mb.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) { var on = document.querySelector('#tabs button.on') || document.querySelector('#tabs button'); if (on) setTimeout(function () { on.focus(); }, 50); }
+    else mb.focus();
+  }
+  document.getElementById('menuBtn').addEventListener('click', function () { drawer(!document.body.classList.contains('open')); });
+  document.getElementById('scrim').addEventListener('click', function () { drawer(false); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && document.body.classList.contains('open')) drawer(false); });
+  document.getElementById('fab').addEventListener('click', function () { tab = 'chg'; render(); window.scrollTo(0, 0); });
   document.getElementById('tabs').addEventListener('click', function (e) {
-    var b = closest(e.target, 'button'); if (!b) return; tab = b.getAttribute('data-tab'); render();
+    var b = closest(e.target, 'button'); if (!b) return; tab = b.getAttribute('data-tab'); render(); document.body.classList.remove('open'); document.getElementById('menuBtn').setAttribute('aria-expanded', 'false'); window.scrollTo(0, 0);
+  });
+  // show the formatted amount under price fields while typing
+  document.getElementById('view').addEventListener('input', function (e) {
+    var t = e.target; if (t.type !== 'number' || !t.parentNode) return;
+    var h = t.parentNode.querySelector('.hint'); if (h) h.textContent = Number(t.value) > 0 ? fmt(Number(t.value)) : '';
   });
 
   document.getElementById('view').addEventListener('change', function (e) {
@@ -398,6 +455,7 @@
     var rowEl = closest(b, '[data-id]'), id = rowEl && rowEl.getAttribute('data-id');
     var lineEl = closest(b, '[data-line]'), li = lineEl ? Number(lineEl.getAttribute('data-line')) : -1;
     if (act.indexOf('acc-') === 0) { accAct(act); return; }
+    if (act.indexOf('go-') === 0) { tab = act.slice(3); render(); window.scrollTo(0, 0); return; }
     if (act === 'ing-add') state.ingredients.push({ id: uid(), name: '', unit: 'kg', price: 0, trimmable: true });
     else if (act === 'ing-del') { if (!confirm('حذف شود؟')) return; state.ingredients = state.ingredients.filter(function (x) { return x.id !== id; }); state.items.forEach(function (it) { it.lines = it.lines.filter(function (l) { return l.ingId !== id; }); }); state.subs = state.subs.filter(function (s) { return s.fromId !== id && s.toId !== id; }); }
     else if (act === 'it-add') state.items.push({ id: uid(), name: '', price: 0, sales: 0, lines: [] });

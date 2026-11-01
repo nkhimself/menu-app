@@ -2,30 +2,61 @@
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://wnyrxfyzzqtoefrmnxnu.supabase.co; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' https://wnyrxfyzzqtoefrmnxnu.supabase.co; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>قیمت‌گذار منو</title>
 <link rel="stylesheet" href="style.css">
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#1f6f5c">
+<meta name="theme-color" content="#0E6E55">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 </head>
 <body>
-<header>
-  <h1>قیمت‌گذار منو <small id="syncstat"></small></h1>
-  <nav id="tabs">
-    <button data-tab="qs" class="on">شروع سریع</button>
-    <button data-tab="chg">چه تغییر کرد</button>
-    <button data-tab="ing">مواد اولیه</button>
-    <button data-tab="menu">منو</button>
-    <button data-tab="sub">جایگزین‌ها</button>
-    <button data-tab="res">نتیجه</button>
-    <button data-tab="set">تنظیمات</button>
-    <button data-tab="acc">حساب</button>
-  </nav>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></symbol>
+  <symbol id="i-res" viewBox="0 0 24 24"><path d="M4 20h16M7 20v-7M12 20V6M17 20v-10"/></symbol>
+  <symbol id="i-qs" viewBox="0 0 24 24"><path d="M13 3L5 14h6l-1 7 8-11h-6z"/></symbol>
+  <symbol id="i-chg" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></symbol>
+  <symbol id="i-ing" viewBox="0 0 24 24"><path d="M5 9h14l-1.5 10h-11zM9 9l3-5 3 5"/></symbol>
+  <symbol id="i-menuitem" viewBox="0 0 24 24"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM9 9h6M9 13h6"/></symbol>
+  <symbol id="i-sub" viewBox="0 0 24 24"><path d="M7 7h11l-3-3M17 17H6l3 3"/></symbol>
+  <symbol id="i-set" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></symbol>
+  <symbol id="i-acc" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+</defs></svg>
+
+<header id="bar">
+  <button class="icon-btn" id="menuBtn" aria-label="باز کردن منو" aria-expanded="false" aria-controls="drawer"><svg class="ico"><use href="#i-menu"/></svg></button>
+  <h1 id="title">قیمت‌گذار منو</h1>
+  <span id="syncstat" class="sync" role="status"></span>
 </header>
+
+<div id="scrim"></div>
+<aside id="drawer" aria-label="منوی برنامه">
+  <div class="brand"><img src="icon-192.png" alt=""><div><b>قیمت‌گذار منو</b><span id="who">بدون حساب</span></div></div>
+  <nav id="tabs">
+    <div class="grp">شروع</div>
+    <button data-tab="qs"><svg class="ico"><use href="#i-qs"/></svg>شروع سریع</button>
+    <div class="grp">کار روزانه</div>
+    <button data-tab="res"><svg class="ico"><use href="#i-res"/></svg>نتیجه و پیشنهاد</button>
+    <button data-tab="chg"><svg class="ico"><use href="#i-chg"/></svg>ثبت قیمت جدید</button>
+    <div class="grp">اطلاعات شما</div>
+    <button data-tab="ing"><svg class="ico"><use href="#i-ing"/></svg>مواد اولیه</button>
+    <button data-tab="menu"><svg class="ico"><use href="#i-menuitem"/></svg>منوی غذاها</button>
+    <button data-tab="sub"><svg class="ico"><use href="#i-sub"/></svg>جایگزین‌ها</button>
+    <div class="grp">برنامه</div>
+    <button data-tab="set"><svg class="ico"><use href="#i-set"/></svg>تنظیمات</button>
+    <button data-tab="acc"><svg class="ico"><use href="#i-acc"/></svg>حساب و ذخیره در ابر</button>
+  </nav>
+  <div class="drawer-foot">نسخهٔ آزمایشی</div>
+</aside>
+
 <main id="view"></main>
+<button id="fab" data-go="chg"><svg class="ico"><use href="#i-plus"/></svg>ثبت قیمت جدید</button>
+
 <script src="config.js"></script>
 <script src="sync.js"></script>
 <script src="logic.js"></script>
