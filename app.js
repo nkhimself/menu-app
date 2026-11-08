@@ -14,7 +14,7 @@
   var focusSel = null;
   var cardOpt = { theme: 'berry', pick: null, wholesale: false };
   var urls = [];
-  var POLICY_V = '1.0', VER = '0.8.1';
+  var POLICY_V = '1.0', VER = '0.8.2';
   var gf = { mode: 'up', first: '', last: '', phone: '', city: '', pass: '', agree: false, msg: '' };   // sign-up form
 
   // ---------- storage ----------
@@ -122,15 +122,17 @@
     if (!rows.length && term) h = '<p class="mute" style="text-align:center">موردی پیدا نشد.</p>';
     return h;
   }
-  function hasSample() { return [].concat(state.items, state.ingredients, state.packs).some(function (x) { return x.sample; }); }
+  var DEMO_IDS = { pz: 1, sw: 1, mozz: 1, proc: 1, dough: 1, sauce: 1, chick: 1, bread: 1, oil: 1, bx: 1 };   // ids used by the built-in demo (also marks demo data made by older versions)
+  function isSample(x) { return x.sample === false ? false : !!(x.sample || DEMO_IDS[x.id]); }
+  function hasSample() { return [].concat(state.items, state.ingredients, state.packs).some(isSample); }
   function deleteSamples() {
-    state.items.filter(function (x) { return x.sample; }).forEach(function (x) { gone(x.id); });
-    state.items = state.items.filter(function (x) { return !x.sample; });
+    state.items.filter(isSample).forEach(function (x) { gone(x.id); });
+    state.items = state.items.filter(function (x) { return !isSample(x); });
     var usedI = {}, usedP = {};
     state.items.forEach(function (x) { (x.lines || []).forEach(function (l) { usedI[l.ingId] = 1; }); (x.pk || []).forEach(function (l) { usedP[l.packId] = 1; }); });
-    state.ingredients.filter(function (x) { return x.sample && !usedI[x.id]; }).forEach(function (x) { delIng(x.id); });
-    state.packs.filter(function (x) { return x.sample && !usedP[x.id]; }).forEach(function (x) { delPack(x.id); });
-    [].concat(state.items, state.ingredients, state.packs).forEach(function (x) { if (x.sample) delete x.sample; });
+    state.ingredients.filter(function (x) { return isSample(x) && !usedI[x.id]; }).forEach(function (x) { delIng(x.id); });
+    state.packs.filter(function (x) { return isSample(x) && !usedP[x.id]; }).forEach(function (x) { delPack(x.id); });
+    [].concat(state.items, state.ingredients, state.packs).forEach(function (x) { if (isSample(x)) { x.sample = false; touch(x); } });
   }
   function viewProds() {
     var w = W(), c = C();
@@ -965,6 +967,7 @@
       settings: { targetFC: 30, minPortion: 85, roundTo: 5000, elasticity: 1.2, qualityDrop: 3, sw: { loss: true, sizes: true } }, su: ts,
       meta: { lastPriceUpdate: ts }
     });
+    [].concat(state.items, state.ingredients, state.packs).forEach(function (x) { x.sample = true; });
   }
   function doExport() { CARD.saveText(JSON.stringify(state, null, 1), 'repricer-backup.json', 'application/json'); }
   function doImport(file) {
