@@ -14,7 +14,7 @@
   var focusSel = null;
   var cardOpt = { theme: 'berry', pick: null, wholesale: false };
   var urls = [];
-  var POLICY_V = '1.0', VER = '0.8';
+  var POLICY_V = '1.0', VER = '0.8.1';
   var gf = { mode: 'up', first: '', last: '', phone: '', city: '', pass: '', agree: false, msg: '' };   // sign-up form
 
   // ---------- storage ----------
@@ -122,10 +122,21 @@
     if (!rows.length && term) h = '<p class="mute" style="text-align:center">موردی پیدا نشد.</p>';
     return h;
   }
+  function hasSample() { return [].concat(state.items, state.ingredients, state.packs).some(function (x) { return x.sample; }); }
+  function deleteSamples() {
+    state.items.filter(function (x) { return x.sample; }).forEach(function (x) { gone(x.id); });
+    state.items = state.items.filter(function (x) { return !x.sample; });
+    var usedI = {}, usedP = {};
+    state.items.forEach(function (x) { (x.lines || []).forEach(function (l) { usedI[l.ingId] = 1; }); (x.pk || []).forEach(function (l) { usedP[l.packId] = 1; }); });
+    state.ingredients.filter(function (x) { return x.sample && !usedI[x.id]; }).forEach(function (x) { delIng(x.id); });
+    state.packs.filter(function (x) { return x.sample && !usedP[x.id]; }).forEach(function (x) { delPack(x.id); });
+    [].concat(state.items, state.ingredients, state.packs).forEach(function (x) { if (x.sample) delete x.sample; });
+  }
   function viewProds() {
     var w = W(), c = C();
     var h = lead(w.many, 'روی هر مورد بزنید تا مواد، قیمت پیشنهادی و جزئیات را ببینید.');
     h += reminderBanner();
+    if (hasSample()) h += '<div class="banner">' + ICON('trash') + '<span>نمونه‌های آماده در برنامه هست.</span><button class="btn sm danger" data-act="sample-del">حذف نمونه‌ها</button></div>';
     if (!state.items.length) {
       return h + empty('هنوز ' + w.one + 'ی ندارید', 'با دکمهٔ + یکی بسازید، یا با راه‌اندازی، مواد و نمونه‌ها را آماده کنید.', [['new-item', 'ساخت ' + w.one + ' جدید', true], ['go-setup', 'راه‌اندازی بر اساس نوع کسب‌وکار'], ['demo', 'نمونهٔ آماده را ببینم']]);
     }
@@ -216,11 +227,11 @@
     else {
       (it.waste || []).forEach(function (l, idx) {
         var wz1 = c.ws[l.wasteId];
-        h += '<div class="line" data-line="' + idx + '"><select data-f="wl-sel" aria-label="ضایعه">' + wasteOptions(l.wasteId) + '</select>' + numField('wl-amt', l.amount, ' aria-label="مقدار"') +
+        h += '<div class="line" data-line="' + idx + '"><select data-f="wl-sel" aria-label="ضایعات">' + wasteOptions(l.wasteId) + '</select>' + numField('wl-amt', l.amount, ' aria-label="مقدار"') +
           '<span class="u">' + (wz1 ? (wz1.unit === 'piece' ? 'عدد' : 'گرم') : '') + (wz1 ? '<br><span class="mini">' + fmt(L.wasteCredit({ waste: [l] }, c)) + '</span>' : '') + '</span>' +
           '<button class="x" data-act="wl-del" aria-label="حذف">' + ICON('close') + '</button></div>';
       });
-      h += '<button class="btn sm" data-act="wl-add">' + ICON('plus') + 'ضایعه</button>';
+      h += '<button class="btn sm" data-act="wl-add">' + ICON('plus') + 'ضایعات</button>';
       if (p.wst > 0) h += '<p class="hintline">فروش ضایعات از هزینهٔ هر واحد <b>' + fmt(p.wst) + '</b> تومان کم کرده است.</p>';
     }
     h += '</div>';
@@ -439,7 +450,7 @@
   }
   function wzFinish() {
     var t = T.types.filter(function (x) { return x.id === wz.type; })[0]; if (!t) return false;
-    var idByKey = {}, ts = now();
+    var idByKey = {}, ts = now(), made = {};
     state.profile.type = t.id; state.profile.done = true;
     state.profile.customName = t.id === 'other' ? (wz.cname || '').trim() : '';
     var swv = { loss: false, batch: false, sizes: false, weight: false };
@@ -449,7 +460,7 @@
     t.ing.forEach(function (key) {
       if (!wz.ing[key]) return;
       var d = T.ing[key], p = L.num(wz.price[key]), g = state.ingredients.filter(function (x) { return x.name === d.n; })[0];
-      if (!g) { g = { id: uid(), name: d.n, unit: d.u, price: 0, trimmable: true, u: ts }; state.ingredients.push(g); }
+      if (!g) { g = { id: uid(), name: d.n, unit: d.u, price: 0, trimmable: true, u: ts }; state.ingredients.push(g); made[g.id] = 1; }
       if (p > 0) setPrice(g, p);
       idByKey[key] = g.id;
     });
@@ -464,11 +475,11 @@
       if (!wz.dish[d.id]) return;
       var lines = d.lines.map(function (l) {
         var def = T.ing[l[0]], g = idByKey[l[0]] ? find(state.ingredients, idByKey[l[0]]) : state.ingredients.filter(function (x) { return x.name === def.n; })[0];
-        if (!g) { g = { id: uid(), name: def.n, unit: def.u, price: 0, trimmable: true, u: ts }; state.ingredients.push(g); }
+        if (!g) { g = { id: uid(), name: def.n, unit: def.u, price: 0, trimmable: true, u: ts }; state.ingredients.push(g); made[g.id] = 1; }
         return { ingId: g.id, amount: l[1] };
       });
       var it = state.items.filter(function (x) { return x.name === d.name; })[0], price = L.num(wz.sell[d.id]);
-      if (!it) { it = { id: uid(), name: d.name, price: price, sales: 0, yield: 1, mode: 'piece', lines: lines, pk: [], u: ts }; state.items.push(it); }
+      if (!it) { it = { id: uid(), name: d.name, price: price, sales: 0, yield: 1, mode: 'piece', lines: lines, pk: [], u: ts }; state.items.push(it); it.sample = true; lines.forEach(function (l) { if (made[l.ingId]) find(state.ingredients, l.ingId).sample = true; }); }
       else if (price > 0) { it.price = price; touch(it); }
     });
     if (state.meta.setupSeconds == null && wz.t0) state.meta.setupSeconds = (now() - wz.t0) / 1000;
@@ -723,7 +734,7 @@
         (cloud.msg ? '<p class="mute" style="margin:0">' + esc(cloud.msg) + '</p>' : '') +
         '<p class="mute sm" style="margin:0">اگر روی دو گوشی کار کنید، تغییرات هر مورد جدا ترکیب می‌شود و آخرین تغییر همان مورد می‌ماند.</p>' +
         '<div class="grid2"><button class="btn" data-act="acc-sync">همگام‌سازی الان</button><button class="btn" data-act="acc-out">خروج</button></div></div>' +
-        '<div class="sec stack"><h3>مشخصات شما</h3>' +
+        '<div class="sec stack"><h3>مشخصات شما</h3>' + (m.profileErr ? '<div class="note warn">مشخصات روی سرور ذخیره نشد: ' + esc(m.profileErr) + '</div>' : '') +
         '<div class="grid2"><div><label class="lbl" for="acc-first">نام</label><input id="acc-first" value="' + esc((m.prof || {}).first || '') + '"></div><div><label class="lbl" for="acc-last">نام خانوادگی</label><input id="acc-last" value="' + esc((m.prof || {}).last || '') + '"></div></div>' +
         '<div><label class="lbl">شمارهٔ موبایل</label><input value="' + esc((m.prof || {}).phone || '') + '" dir="ltr" disabled></div>' +
         '<div><label class="lbl" for="acc-city">شهر</label><input id="acc-city" value="' + esc(m.city || '') + '" list="gf-cities"></div>' +
@@ -752,7 +763,7 @@
     } else if (act === 'acc-sync') { reconcile(false); }
     else if (act === 'acc-usecloud') { S.pull().then(function (row) { if (row) adopt(row.state || {}, row.updated_at); }).catch(function (e) { setCloud('err', (e && e.text) || 'اتصال برقرار نشد'); }); }
     else if (act === 'acc-usethis') { if (confirm('اطلاعات ابر با اطلاعات این دستگاه جایگزین شود؟')) syncNow(0, true); }
-    else if (act === 'acc-prof') { var m = S.meta(), pr = m.prof || {}; m.city = v('acc-city'); m.prof = { first: v('acc-first') || pr.first, last: v('acc-last') || pr.last, phone: pr.phone, city: m.city, v: pr.v || POLICY_V, at: pr.at || new Date().toISOString() }; S.saveMeta(); S.markDirty(); S.saveProfile({ user_id: S.user().id, first_name: m.prof.first, last_name: m.prof.last, phone: m.prof.phone, city: m.city, policy_version: m.prof.v, accepted_at: m.prof.at, app_version: VER }).catch(function () {}); syncNow(0); setCloud('ok', 'مشخصات ذخیره شد.'); }
+    else if (act === 'acc-prof') { var m = S.meta(), pr = m.prof || {}; m.city = v('acc-city'); m.prof = { first: v('acc-first') || pr.first, last: v('acc-last') || pr.last, phone: pr.phone, city: m.city, v: pr.v || POLICY_V, at: pr.at || new Date().toISOString() }; S.saveMeta(); S.markDirty(); S.saveProfile({ user_id: S.user().id, first_name: m.prof.first, last_name: m.prof.last, phone: m.prof.phone, city: m.city, policy_version: m.prof.v, accepted_at: m.prof.at, app_version: VER }).then(function () { m.profileErr = ''; S.saveMeta(); render(); }).catch(function (e) { m.profileErr = (e && e.text) || 'خطا'; S.saveMeta(); render(); }); syncNow(0); setCloud('ok', 'مشخصات ذخیره شد.'); }
     else if (act === 'acc-del') { if (!confirm('اطلاعات شما از ابر حذف شود؟')) return; S.deleteCloud().then(function () { setCloud('ok', 'اطلاعات ابری حذف شد.'); }).catch(function (e) { setCloud('err', (e && e.text) || 'اتصال برقرار نشد'); }); }
     else if (act === 'acc-check') {
       cloud.checked = 'در حال بررسی…'; render();
@@ -765,15 +776,15 @@
   function viewWaste() {
     var w = W();
     var h = lead('ضایعات قابل فروش', 'هر چیزی که از کار می‌ماند و می‌فروشید، مثل استخوان یا روغن مصرف‌شده. اینجا اسم و قیمت فروشش را بنویسید؛ مقدارش را داخل هر ' + w.one + ' می‌نویسید و از هزینه کم می‌شود.');
-    if (!state.wastes.length) return h + empty('هنوز ضایعه‌ای ثبت نکرده‌اید', 'مثلاً «استخوان» یا «روغن مصرف‌شده».', [['ws-add', 'افزودن ضایعه', true]]);
+    if (!state.wastes.length) return h + empty('هنوز ضایعاتی ثبت نکرده‌اید', 'مثلاً «استخوان» یا «روغن مصرف‌شده».', [['ws-add', 'افزودن ضایعات', true]]);
     state.wastes.forEach(function (x) {
       var n = state.items.filter(function (it) { return (it.waste || []).some(function (l) { return l.wasteId === x.id; }); }).length;
-      h += '<div class="item" data-id="' + x.id + '"><div class="rowx"><div class="grow"><input data-f="ws-name" value="' + esc(x.name) + '" placeholder="مثلاً استخوان" aria-label="نام ضایعه"></div><button class="x" data-act="ws-del" aria-label="حذف">' + ICON('trash') + '</button></div>' +
+      h += '<div class="item" data-id="' + x.id + '"><div class="rowx"><div class="grow"><input data-f="ws-name" value="' + esc(x.name) + '" placeholder="مثلاً استخوان" aria-label="نام ضایعات"></div><button class="x" data-act="ws-del" aria-label="حذف">' + ICON('trash') + '</button></div>' +
         '<div class="grid2" style="margin-top:8px"><div><span class="lbl">اندازه‌گیری با</span><select data-f="ws-unit" aria-label="واحد"><option value="kg"' + (x.unit === 'kg' ? ' selected' : '') + '>کیلوگرم</option><option value="piece"' + (x.unit === 'piece' ? ' selected' : '') + '>عدد</option></select></div>' +
         '<div><span class="lbl">قیمت فروش هر ' + (x.unit === 'piece' ? 'عدد' : 'کیلوگرم') + '</span>' + numField('ws-price', x.price, ' aria-label="قیمت فروش"', true) + '</div></div>' +
         '<p class="mute sm" style="margin:8px 0 0">' + (n ? 'در ' + n + ' ' + esc(w.one) + ' استفاده شده.' : 'هنوز در هیچ ' + esc(w.one) + ' استفاده نشده؛ مقدارش را داخل خود ' + esc(w.one) + ' بنویسید.') + '</p></div>';
     });
-    return h + '<button class="btn pri block" data-act="ws-add">' + ICON('plus') + 'ضایعهٔ جدید</button>';
+    return h + '<button class="btn pri block" data-act="ws-add">' + ICON('plus') + 'ضایعات جدید</button>';
   }
 
   // ======================================================= sign-up gate and policies
@@ -838,7 +849,7 @@
   function ensureProfile() {
     if (!S || !S.user()) return Promise.resolve();
     var m = S.meta();
-    var p = m.profilePending ? S.saveProfile(m.profilePending).then(function () { m.profilePending = null; S.saveMeta(); }).catch(function () {}) : Promise.resolve();
+    var p = m.profilePending ? S.saveProfile(m.profilePending).then(function () { m.profilePending = null; m.profileErr = ''; S.saveMeta(); }).catch(function (e) { m.profileErr = (e && e.text) || 'خطا'; S.saveMeta(); }) : Promise.resolve();
     return p.then(function () {
       if (m.prof && m.prof.first) return S.touchProfile(VER).catch(function () {});
       return S.getProfile().then(function (row) {
@@ -860,7 +871,7 @@
   function finishProfile(p) {
     var m = S.meta(); m.prof = { first: p.first_name, last: p.last_name, phone: p.phone, city: p.city, v: p.policy_version, at: p.accepted_at }; m.city = p.city; S.saveMeta();
     p.user_id = S.user().id;
-    return S.saveProfile(p).then(function () { m.profilePending = null; S.saveMeta(); }).catch(function (e) { m.profilePending = p; S.saveMeta(); });
+    return S.saveProfile(p).then(function () { m.profilePending = null; m.profileErr = ''; S.saveMeta(); }).catch(function (e) { m.profilePending = p; m.profileErr = (e && e.text) || 'خطا'; S.saveMeta(); });
   }
   function gateAct(act) {
     if (act === 'gf-mode-in') { gf.mode = 'in'; gf.msg = ''; render(); return; }
@@ -1136,6 +1147,7 @@
     else if (act === 'it-dup') { if (!it) return; var cp = JSON.parse(JSON.stringify(it)); cp.id = uid(); cp.name = (it.name || '') + ' (کپی)'; cp.u = now(); state.items.push(cp); cur = cp.id; focusSel = '[data-f="it-name"]'; }
     else if (act === 'it-mode-piece') { if (it) { it.mode = 'piece'; touch(it); } }
     else if (act === 'it-mode-kg') { if (it) { it.mode = 'kg'; touch(it); } }
+    else if (act === 'sample-del') { if (!confirm('همهٔ نمونه‌های آماده و مواد آن‌ها حذف شوند؟')) return; deleteSamples(); }
     else if (act === 'ws-add') { state.wastes.push({ id: uid(), name: '', unit: 'kg', price: 0, u: now() }); }
     else if (act === 'ws-del') { if (!confirm('حذف شود؟')) return; gone(id); state.wastes = state.wastes.filter(function (x) { return x.id !== id; }); state.items.forEach(function (x) { var n0 = (x.waste || []).length; x.waste = (x.waste || []).filter(function (l) { return l.wasteId !== id; }); if (x.waste.length !== n0) touch(x); }); }
     else if (act === 'wl-add') { if (it && state.wastes.length) { it.waste = it.waste || []; it.waste.push({ wasteId: state.wastes[0].id, amount: 0 }); touch(it); } }

@@ -1,5 +1,5 @@
 // Offline cache. Bump VERSION when you replace the app files so phones fetch the new ones.
-const VERSION = 'repricer-v13';
+const VERSION = 'repricer-v14';
 const FILES = ['./', './index.html', './style.css', './vazirmatn.woff2', './config.js', './sync.js', './logic.js', './templates.js', './card.js', './app.js', './manifest.json', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
