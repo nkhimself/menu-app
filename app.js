@@ -1,48 +1,62 @@
 (function () {
   'use strict';
-  var KEY = 'repricer.v1';
-  var L = window.Logic;
-  var DEFAULT = { ingredients: [], items: [], subs: [],
-    settings: { targetFC: 30, minPortion: 85, roundTo: 5000, elasticity: 1.2, qualityDrop: 3 },
-    meta: { setupSeconds: null, setups: 0, priceUpdates: 0 } };
+  var KEY = 'repricer.v1';   // same storage key as the old version, so old data is kept
+  var NAME = 'قیمت‌گذار';    // working name: change it here and in index.html / manifest.json
+  var L = window.Logic, T = window.Templates, S = window.Sync, CARD = window.Card;
   var state = load();
-  var tab = state.items.length ? 'res' : 'qs';
-  var T = window.Templates;
-  var qs = { dishes: {}, prices: {}, sell: {}, t0: null };
-  var upd = {};
+  var tab = state.profile.done ? 'prods' : 'setup';
+  var cur = null;                       // product open in the detail screen
+  var upd = {};                         // typed new prices on "register new prices"
+  var q = { ing: '', pk: '', prod: '' };
+  var scaleK = 1;
+  var wz = null;                        // setup wizard state
+  var qc = { lines: [], other: 0, n: 1 };
+  var focusSel = null;
+  var cardOpt = { theme: 'berry', pick: null, wholesale: false };
+  var urls = [];
 
+  // ---------- storage ----------
   function load() {
-    try { var s = localStorage.getItem(KEY); if (s) return merge(JSON.parse(s)); } catch (e) {}
-    return JSON.parse(JSON.stringify(DEFAULT));
-  }
-  function merge(s) {
-    var d = JSON.parse(JSON.stringify(DEFAULT));
-    d.ingredients = s.ingredients || []; d.items = s.items || []; d.subs = s.subs || [];
-    for (var k in s.settings || {}) d.settings[k] = s.settings[k];
-    for (var m in s.meta || {}) d.meta[m] = s.meta[m];
-    return d;
+    try { var s = localStorage.getItem(KEY); if (s) return L.normalize(JSON.parse(s)); } catch (e) {}
+    return L.blank();
   }
   function saveLocal() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
-  function save() { saveLocal(); if (window.Sync && Sync.user()) { Sync.markDirty(); scheduleSync(); } }
-  function uid() { return 'i' + Math.random().toString(36).slice(2, 9); }
-  function fmt(n) { return Math.round(n).toLocaleString('en-US'); }
+  function save() { saveLocal(); if (S && S.user()) { S.markDirty(); scheduleSync(); } }
+  function now() { return Date.now(); }
+  function touch(o) { o.u = now(); return o; }
+  function touchSettings() { state.su = now(); }
+  function gone(id) { state.del[id] = now(); }
+  function uid() { return 'i' + Math.random().toString(36).slice(2, 9) + Math.random().toString(36).slice(2, 4); }
+
+  // ---------- small helpers ----------
+  function fmt(n) { return Math.round(Number(n) || 0).toLocaleString('en-US'); }
   function pct(n) { return (Math.round(n * 10) / 10) + '%'; }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-  function ingOptions(sel) {
-    return state.ingredients.map(function (i) { return '<option value="' + i.id + '"' + (i.id === sel ? ' selected' : '') + '>' + esc(i.name) + '</option>'; }).join('');
-  }
-  var UNIT = { kg: 'هر کیلوگرم', l: 'هر لیتر', piece: 'هر عدد' };
-  var AMT = { kg: 'گرم', l: 'میلی‌لیتر', piece: 'عدد' };
-
-
-  // ---------- small UI helpers ----------
-  var TITLES = { qs: 'شروع سریع', res: 'نتیجه و پیشنهاد', chg: 'ثبت قیمت جدید', ing: 'مواد اولیه', menu: 'منوی غذاها', sub: 'جایگزین‌ها', set: 'تنظیمات', acc: 'حساب' };
+  function find(arr, id) { return arr.filter(function (x) { return x.id === id; })[0]; }
+  function closest(el, sel) { while (el && el.nodeType === 1) { if (el.matches(sel)) return el; el = el.parentNode; } return null; }
   function ICON(n) { return '<svg class="ico" aria-hidden="true"><use href="#i-' + n + '"/></svg>'; }
   function lead(t, sub) { return '<div class="lead"><h2>' + t + '</h2>' + (sub ? '<p>' + sub + '</p>' : '') + '</div>'; }
-  // number input; hint = show the formatted amount under it (for toman prices)
+  function curType() { return T.types.filter(function (t) { return t.id === state.profile.type; })[0] || null; }
+  function W() { var t = curType(); return { one: (t && t.one) || 'محصول', many: (t && t.many) || 'محصولات' }; }
+  function full() { return state.settings.mode === 'full'; }
+  function C() { return L.ctx(state); }
+  var UNIT = { kg: 'هر کیلوگرم', l: 'هر لیتر', piece: 'هر عدد' };
+  var AMT = { kg: 'گرم', l: 'میلی‌لیتر', piece: 'عدد' };
+  var UNAME = { kg: 'کیلوگرم', l: 'لیتر', piece: 'عدد' };
+
+  // optional fields are shown when switched on in the settings, or when the data already uses them
+  function showSw(k) {
+    if (state.settings.sw[k]) return true;
+    if (k === 'loss') return state.ingredients.some(function (g) { return L.num(g.loss) > 0; });
+    if (k === 'batch') return state.items.some(function (i) { return i.yield > 1; });
+    if (k === 'sizes') return state.items.some(function (i) { return (i.sizes || []).length; });
+    if (k === 'weight') return state.items.some(function (i) { return i.mode === 'kg'; });
+    return false;
+  }
+
   function numField(f, val, extra, hint) {
     var v = (val == null) ? '' : val;
-    return '<div class="fld"><input type="number" min="0" inputmode="decimal" data-f="' + f + '"' + (extra || '') + ' value="' + v + '">' +
+    return '<div class="fld"><input type="number" min="0" step="any" inputmode="decimal" data-f="' + f + '"' + (extra || '') + ' value="' + v + '">' +
       (hint ? '<span class="hint">' + (Number(val) > 0 ? fmt(Number(val)) : '') + '</span>' : '') + '</div>';
   }
   function empty(title, text, actions) {
@@ -53,47 +67,469 @@
   function unitOpts(sel) {
     return [['kg', 'کیلوگرم'], ['l', 'لیتر'], ['piece', 'عدد']].map(function (u) { return '<option value="' + u[0] + '"' + (u[0] === sel ? ' selected' : '') + '>' + u[1] + '</option>'; }).join('');
   }
+  function ingOptions(sel) {
+    return state.ingredients.map(function (i) { return '<option value="' + i.id + '"' + (i.id === sel ? ' selected' : '') + '>' + esc(i.name || '(بدون نام)') + '</option>'; }).join('');
+  }
+  function packOptions(sel) {
+    return state.packs.map(function (i) { return '<option value="' + i.id + '"' + (i.id === sel ? ' selected' : '') + '>' + esc(i.name || '(بدون نام)') + '</option>'; }).join('');
+  }
+  function unitWord(it) { return it.mode === 'kg' ? 'هر کیلوگرم' : 'هر عدد'; }
 
-  // ---------- views ----------
-  function viewIng() {
-    var h = lead('قیمت امروز مواد', 'هر وقت قیمتی عوض شد، همین‌جا عدد را اصلاح کنید؛ بقیه خودکار حساب می‌شود.');
-    if (!state.ingredients.length) return h + empty('هنوز ماده‌ای ندارید', 'با «شروع سریع» در دو دقیقه آماده شوید، یا مواد را یکی‌یکی وارد کنید.', [['go-qs', 'شروع سریع', true], ['ing-add', 'افزودن ماده'], ['demo', 'نمونهٔ آماده را ببینم']]);
-    state.ingredients.forEach(function (g) {
-      var ch = '';
-      if (g.prevPrice != null && g.prevPrice !== g.price && g.prevPrice > 0) { var p = (g.price / g.prevPrice - 1) * 100; ch = '<span class="chg ' + (p > 0 ? 'up' : 'down') + '">' + (p > 0 ? '+' : '') + pct(p) + '</span> <span class="mute sm">قبلاً ' + fmt(g.prevPrice) + '</span>'; }
-      h += '<div class="item" data-id="' + g.id + '">' +
-        '<div class="rowx"><div class="grow"><input data-f="ing-name" value="' + esc(g.name) + '" placeholder="نام ماده" aria-label="نام ماده"></div><button class="x" data-act="ing-del" aria-label="حذف ماده">' + ICON('trash') + '</button></div>' +
-        '<div class="grid2" style="margin-top:8px"><div><span class="lbl">واحد خرید</span><select data-f="ing-unit" aria-label="واحد">' + unitOpts(g.unit) + '</select></div>' +
-        '<div><span class="lbl">' + UNIT[g.unit] + '</span>' + numField('ing-price', g.price, ' aria-label="قیمت"', true) + '</div></div>' +
-        '<div class="rowx" style="margin-top:4px;align-items:center;justify-content:space-between"><label class="switch"><input type="checkbox" data-f="ing-trim"' + (g.trimmable !== false ? ' checked' : '') + '> مقدارش قابل کم‌کردن باشد</label><span>' + ch + '</span></div></div>';
+  // set an ingredient price and keep its history ("rose 12% in 30 days")
+  function setPrice(g, p) {
+    p = L.num(p);
+    if (p === g.price) return false;
+    var t = now();
+    if (g.price > 0) { g.prevPrice = g.price; if (!(g.history || []).length) g.history = [{ t: g.u || t - 864e5, p: g.price }]; }
+    g.price = p; g.history = (g.history || []).concat([{ t: t, p: p }]).slice(-40);
+    touch(g); state.meta.lastPriceUpdate = t; return true;
+  }
+  function applyPack(g) {   // recompute the price per kg / l / piece from the pack price
+    if (L.num(g.packQty) > 0) setPrice(g, L.packUnitPrice(g.packPrice, g.packQty));
+  }
+
+  // ---------- titles ----------
+  function titleOf() {
+    var w = W();
+    var t = { prods: w.many, prod: w.one, ings: 'مواد اولیه', packs: 'بسته‌بندی', quick: 'قیمت سریع', setup: 'راه‌اندازی', chg: 'ثبت قیمت جدید', res: 'پیشنهاد قیمت', cards: 'کارت و فهرست قیمت', sub: 'جایگزین‌ها', set: 'تنظیمات', acc: 'حساب', help: 'راهنما' };
+    return t[tab] || NAME;
+  }
+
+  // ======================================================= products list
+  function reminderBanner() {
+    var d = L.num(state.settings.remindDays), last = state.meta.lastPriceUpdate;
+    if (!state.ingredients.length || !last || d <= 0) return '';
+    var days = Math.floor((now() - last) / 864e5);
+    if (days < d) return '';
+    return '<div class="banner">' + ICON('bell') + '<span>قیمت مواد ' + days + ' روز است که به‌روز نشده. قیمت‌ها را بررسی کنید.</span><button class="btn sm pri" data-act="go-chg">ثبت قیمت</button></div>';
+  }
+  function prodCards() {
+    var c = C(), tg = L.num(state.settings.targetFC), term = q.prod.trim();
+    var rows = state.items.filter(function (it) { return !term || (it.name || '').indexOf(term) >= 0; });
+    var h = '';
+    rows.forEach(function (it) {
+      var cost = L.unitCost(it, c), P = L.num(it.price), fc = P > 0 ? cost / P * 100 : 0, over = P > 0 && fc > L.itemTarget(it, c) + 1e-9;
+      var sug = L.suggest(it, c, cost);
+      h += '<button class="pcard' + (over ? ' over' : '') + '" data-act="open" data-id="' + it.id + '"><div class="top"><span class="nm">' + esc(it.name || '(بدون نام)') + '</span><span class="pr">' + (P > 0 ? fmt(P) : '—') + '</span></div>' +
+        '<div class="meta"><span>هزینه <b>' + fmt(cost) + '</b></span>' + (P > 0 ? '<span class="chip ' + (over ? 'up' : 'down') + '">' + pct(fc) + '</span>' : '') +
+        (it.mode === 'kg' ? '<span class="chip">وزنی</span>' : '') + (cost > 0 ? '<span class="chip sun">پیشنهاد ' + fmt(sug) + '</span>' : '') + '</div></button>';
     });
+    if (!rows.length && term) h = '<p class="mute" style="text-align:center">موردی پیدا نشد.</p>';
+    return h;
+  }
+  function viewProds() {
+    var w = W(), c = C();
+    var h = lead(w.many, 'روی هر مورد بزنید تا مواد، قیمت پیشنهادی و جزئیات را ببینید.');
+    h += reminderBanner();
+    if (!state.items.length) {
+      return h + empty('هنوز ' + w.one + 'ی ندارید', 'با دکمهٔ + یکی بسازید، یا با راه‌اندازی، مواد و نمونه‌ها را آماده کنید.', [['new-item', 'ساخت ' + w.one + ' جدید', true], ['go-setup', 'راه‌اندازی بر اساس نوع کسب‌وکار'], ['demo', 'نمونهٔ آماده را ببینم']]);
+    }
+    var nOver = state.items.filter(function (it) { return L.num(it.price) > 0 && L.unitCost(it, c) / it.price * 100 > L.itemTarget(it, c) + 1e-9; }).length;
+    h += '<div class="note" style="margin-top:0">' + (nOver ? '<b>' + nOver + '</b> مورد از هدف هزینه بالاتر است. ' + '<a href="#" data-act="go-res">پیشنهادها</a>' : 'همه در محدودهٔ هدف‌اند.') + '</div>';
+    if (state.items.length > 6) h += '<input class="search" data-f="q-prod" type="search" placeholder="جستجو" value="' + esc(q.prod) + '" aria-label="جستجو">';
+    h += '<div id="list">' + prodCards() + '</div>';
+    return h;
+  }
+
+  // ======================================================= product detail
+  function donut(p) {
+    var parts = [{ k: 'مواد', v: p.ing, c: 'var(--brand)' }, { k: 'بسته‌بندی', v: p.pack, c: 'var(--saffron)' }, { k: 'دستمزد', v: p.lab, c: '#5B84C4' }, { k: 'سربار', v: p.ovh, c: '#B07BC2' }].filter(function (x) { return x.v > 1e-9; });
+    var tot = parts.reduce(function (a, x) { return a + x.v; }, 0);
+    if (tot <= 0) return '';
+    var off = 25, svg = '<svg viewBox="0 0 36 36" role="img" aria-label="سهم هر بخش از هزینه"><circle cx="18" cy="18" r="15.9155" fill="none" stroke="var(--surface2)" stroke-width="5"/>', lg = '';
+    parts.forEach(function (x) {
+      var pc = x.v / tot * 100;
+      svg += '<circle cx="18" cy="18" r="15.9155" fill="none" stroke="' + x.c + '" stroke-width="5" stroke-dasharray="' + pc.toFixed(2) + ' ' + (100 - pc).toFixed(2) + '" stroke-dashoffset="' + off.toFixed(2) + '"/>';
+      off -= pc;
+      lg += '<div><i style="background:' + x.c + '"></i>' + x.k + '<span>' + Math.round(pc) + '% · ' + fmt(x.v) + '</span></div>';
+    });
+    return '<div class="donutbox">' + svg + '</svg><div class="legend">' + lg + '</div></div>';
+  }
+
+  function scaleHTML(it) {
+    var c = C(), k = scaleK, h = '';
+    h += '<div class="gnote"><span>ضریب: <b>×' + k + '</b></span><span>تعداد: <b>' + (it.mode === 'kg' ? '' : fmt(it.yield * k)) + '</b></span></div>';
+    (it.lines || []).forEach(function (l) {
+      var g = c.ing[l.ingId]; if (!g) return;
+      h += '<div class="listrow" style="padding:8px 0"><div class="tx">' + esc(g.name) + '</div><b style="direction:ltr">' + (Math.round(L.num(l.amount) * k * 10) / 10) + ' ' + AMT[g.unit] + '</b></div>';
+    });
+    h += '<div class="gnote" style="margin-top:6px"><span>هزینهٔ مواد این دسته</span><b>' + fmt(L.batchIng(it, c) * k) + '</b></div>';
+    return h;
+  }
+
+  function viewProd() {
+    var it = find(state.items, cur), w = W();
+    if (!it) { tab = 'prods'; return viewProds(); }
+    var c = C(), r = L.scenarios(it, c, state.subs), p = L.parts(it, c), cost = r.cost, P = L.num(it.price);
+    var h = '<button class="back" data-act="go-prods">' + ICON('back') + w.many + '</button>';
+    // result first: the answer is the largest thing on the screen
+    h += '<div class="hero' + (r.over ? ' over' : '') + '"><div class="k">قیمت پیشنهادی ' + unitWord(it) + ' (هدف هزینه ' + pct(r.target) + ')</div>' +
+      '<div class="big">' + fmt(r.suggested) + '<small>تومان</small></div><div class="row">' +
+      '<div>هزینه<b>' + fmt(cost) + '</b></div>' +
+      '<div>سود در قیمت فعلی<b>' + (P > 0 ? fmt(P - cost) : '—') + '</b></div>' +
+      '<div>سهم هزینه<b>' + (P > 0 ? pct(r.fc * 100) : '—') + '</b></div></div></div>';
+
+    h += '<div class="sec stack"><div><label class="lbl">نام</label><input data-f="it-name" data-id="' + it.id + '" value="' + esc(it.name) + '" placeholder="نام ' + w.one + '"></div>';
+    if (showSw('weight')) {
+      h += '<div><span class="lbl">روش فروش</span><div class="seg"><button data-act="it-mode-piece" class="' + (it.mode === 'piece' ? 'on' : '') + '">عددی</button><button data-act="it-mode-kg" class="' + (it.mode === 'kg' ? 'on' : '') + '">وزنی (کیلویی)</button></div></div>';
+    }
+    h += '<div class="grid2"><div><span class="lbl">قیمت فروش ' + unitWord(it) + '</span>' + numField('it-price', it.price, ' aria-label="قیمت فروش"', true) + '</div>' +
+      '<div><span class="lbl">فروش ماهانه (اختیاری)</span>' + numField('it-sales', it.sales || '', ' aria-label="فروش ماهانه"') + '</div></div>';
+    if (it.mode === 'kg') h += '<div><span class="lbl">کاهش وزن بعد از پخت (%)</span>' + numField('it-cook', it.cookLoss || '', ' max="90"') + '<p class="hintline">وزن مواد را قبل و بعد از پخت بسنجید. قیمت بر اساس وزن نهایی حساب می‌شود.</p></div>';
+    else if (showSw('batch')) h += '<div><span class="lbl">این دستور چند عدد می‌شود؟</span>' + numField('it-yield', it.yield > 1 ? it.yield : '', ' placeholder="1"') + '<p class="hintline">مقدار مواد پایین برای کل این دستور است. هزینهٔ هر عدد از تقسیم حساب می‌شود.</p></div>';
+    h += '</div>';
+
+    // ingredients
+    h += '<div class="sec" data-grp="lines"><h3>مواد' + (it.mode === 'kg' || it.yield > 1 ? ' (کل دستور)' : '') + '</h3>';
+    if (!state.ingredients.length) h += '<p class="mute">اول از بخش «مواد اولیه» ماده‌ها را وارد کنید.</p><button class="btn block" data-act="go-ings">رفتن به مواد اولیه</button>';
+    else {
+      (it.lines || []).forEach(function (l, idx) {
+        var g = c.ing[l.ingId];
+        h += '<div class="line" data-line="' + idx + '"><select data-f="ln-ing" aria-label="ماده">' + ingOptions(l.ingId) + '</select>' + numField('ln-amt', l.amount, ' aria-label="مقدار"') +
+          '<span class="u">' + (g ? AMT[g.unit] : '') + (g ? '<br><span class="mini">' + fmt(L.lineCost(g, l.amount)) + '</span>' : '') + '</span>' +
+          '<button class="x" data-act="ln-del" aria-label="حذف ماده از این ' + w.one + '">' + ICON('close') + '</button></div>';
+      });
+      h += '<button class="btn sm" data-act="ln-add">' + ICON('plus') + 'ماده</button>';
+    }
+    h += '</div>';
+
+    // packaging
+    h += '<div class="sec pk" data-grp="pk"><h3>بسته‌بندی (برای هر فروش)</h3>';
+    if (!state.packs.length) h += '<p class="mute">ظرف، جعبه یا کیسه‌ای ثبت نکرده‌اید.</p><button class="btn block" data-act="go-packs">رفتن به بسته‌بندی</button>';
+    else {
+      (it.pk || []).forEach(function (l, idx) {
+        h += '<div class="line" data-line="' + idx + '"><select data-f="pk-sel" aria-label="بسته‌بندی">' + packOptions(l.packId) + '</select>' + numField('pk-qty', l.qty, ' aria-label="تعداد"') +
+          '<button class="x" data-act="pk-del" aria-label="حذف">' + ICON('close') + '</button></div>';
+      });
+      h += '<button class="btn sm" data-act="pk-add">' + ICON('plus') + 'بسته‌بندی</button>';
+    }
+    h += '</div>';
+
+    // full mode: labour, wholesale, own target
+    if (full()) {
+      h += '<div class="sec stack"><h3>دستمزد و فروش عمده</h3>' +
+        '<div><span class="lbl">زمان کار برای کل این دستور (دقیقه)</span>' + numField('it-min', it.minutes || '') + '<p class="hintline">دستمزد ساعتی و درصد سربار را در تنظیمات می‌نویسید' + (L.num(state.settings.wage) <= 0 ? ' (الان صفر است)' : '') + '.</p></div>' +
+        '<div class="grid2"><div><span class="lbl">قیمت عمده (اختیاری)</span>' + numField('it-whole', it.wholesale || '', '', true) + '</div>' +
+        '<div><span class="lbl">هدف هزینه برای این مورد (%)</span>' + numField('it-tgt', it.tgt || '', ' placeholder="' + state.settings.targetFC + '"') + '</div></div>';
+      if (L.num(it.wholesale) > 0) { var wh = L.wholesale(it, c); h += '<div class="gnote"><span>در قیمت عمده: سهم هزینه <b>' + pct(wh.fc * 100) + '</b></span><span>سود هر واحد <b>' + fmt(wh.profit) + '</b></span></div>'; }
+      h += '</div>';
+    } else {
+      h += '<div class="note">برای حساب دستمزد، سربار و قیمت عمده، «حالت کامل» را در تنظیمات روشن کنید.</div>';
+    }
+
+    // sizes
+    if (showSw('sizes')) {
+      h += '<div class="sec sizes" data-grp="sz"><h3>اندازه‌ها (کوچک، بزرگ...)</h3><p class="hintline">ضریب یعنی چند برابر مقدار پایه. مثلاً بزرگ = 1.5</p>';
+      var rows = L.sizeRows(it, c);
+      (it.sizes || []).forEach(function (z, idx) {
+        var rr = rows[idx];
+        h += '<div class="line" data-line="' + idx + '"><input data-f="sz-name" value="' + esc(z.name) + '" placeholder="نام" aria-label="نام اندازه">' + numField('sz-factor', z.factor, ' step="0.05" aria-label="ضریب"') + numField('sz-price', z.price, ' aria-label="قیمت"') +
+          '<button class="x" data-act="sz-del" aria-label="حذف">' + ICON('close') + '</button></div>' +
+          '<div class="gnote" style="margin:-4px 2px 8px"><span>هزینه <b>' + fmt(rr.cost) + '</b> · سهم <b>' + pct(rr.fc * 100) + '</b></span><span>پیشنهاد <b>' + fmt(rr.suggested) + '</b></span></div>';
+      });
+      h += '<button class="btn sm" data-act="sz-add">' + ICON('plus') + 'اندازه</button></div>';
+    }
+
+    // cost share
+    var dn = donut(p);
+    if (dn) h += '<div class="sec"><h3>هزینه از چه چیزی است؟</h3>' + dn + '</div>';
+
+    // scaling
+    if ((it.lines || []).length) {
+      h += '<div class="sec"><h3>مقیاس دسته</h3><p class="hintline">برای وقتی که بیشتر یا کمتر از یک دستور می‌پزید. چیزی ذخیره نمی‌شود.</p>' +
+        '<input class="rng" type="range" min="0.5" max="10" step="0.5" value="' + scaleK + '" data-f="scale" aria-label="ضریب دسته"><div id="scalebox">' + scaleHTML(it) + '</div></div>';
+    }
+
+    // suggestions
+    if (r.over) {
+      var b = r.scenarios[r.best], names = { nothing: 'تغییر نمی‌دهم', raise: 'قیمت را بالا می‌برم', keep: 'قیمت را نگه می‌دارم و مواد را اصلاح می‌کنم' };
+      var unit = r.hasSales ? 'سود ماهانه' : 'سود هر واحد';
+      h += '<div class="sec"><h3>چه کنم؟</h3><div class="ticket"><b>' + (r.best === 'raise' ? 'قیمت را به ' + fmt(b.price) + ' برسانید' : r.best === 'keep' ? 'قیمت را نگه دارید و مواد را اصلاح کنید' : 'تغییر ندهید؛ با افت فروش احتمالی، سود بهتری ندارد') + '</b><span>' + unit + ': ' + fmt(b.profit) + (r.best !== 'nothing' ? ' (بدون تغییر: ' + fmt(r.scenarios.nothing.profit) + ')' : '') + '</span></div>';
+      if (r.explain.length && r.explain[0].delta > 0) h += '<p class="cause">بیشترین علت: ' + esc(r.explain[0].name) + '، ' + pct(r.explain[0].pct) + ' گران‌تر شده</p>';
+      h += '<details><summary>همهٔ گزینه‌ها</summary>';
+      ['nothing', 'raise', 'keep'].forEach(function (k) {
+        var o = r.scenarios[k];
+        h += '<div class="opt' + (r.best === k ? ' best' : '') + '"><div class="t">' + names[k] + (r.best === k ? ' ✓' : '') + '</div><div><span class="k">قیمت</span><span class="v">' + fmt(o.price) + '</span></div><div><span class="k">هزینه</span><span class="v">' + fmt(o.cost) + '</span></div><div><span class="k">' + unit + '</span><span class="v">' + fmt(o.profit) + '</span></div></div>';
+      });
+      if (r.plan.actions.length) {
+        h += '<p style="margin:12px 0 2px"><b>اگر قیمت را نگه دارید:</b></p><ul class="plan">';
+        r.plan.actions.forEach(function (a) {
+          if (a.type === 'swap') h += '<li>' + Math.round(a.amountFrom) + ' از «' + esc(a.fromName) + '» (' + pct(a.percent) + ' آن) را با ' + Math.round(a.amountTo) + ' از «' + esc(a.toName) + '» عوض کنید؛ صرفه‌جویی ' + fmt(a.saving) + '</li>';
+          else h += '<li>«' + esc(a.name) + '» را ' + pct(a.percent) + ' کم کنید (از ' + Math.round(a.amountFrom) + ' به ' + Math.round(a.amountTo) + ')؛ صرفه‌جویی ' + fmt(a.saving) + '</li>';
+        });
+        h += '</ul>';
+        if (r.plan.needsPriceRise) h += '<div class="note warn">این کم‌کردن‌ها کافی نیست؛ قیمت باید حداقل ' + fmt(r.plan.priceNeeded) + ' شود.</div>';
+      } else if (r.plan.needsPriceRise) h += '<div class="note warn">جایگزین یا کم‌کردن مجازی تعریف نشده؛ فقط افزایش قیمت باقی می‌ماند.</div>';
+      h += '</details></div>';
+    }
+
+    h += '<div class="sec stack"><button class="btn block" data-act="card-one">' + ICON('share') + 'کارت قیمت برای اینستاگرام و ...</button>' +
+      '<div class="grid2"><button class="btn" data-act="it-dup">' + ICON('copy') + 'کپی</button><button class="btn danger" data-act="it-del">' + ICON('trash') + 'حذف</button></div></div>';
+    return h;
+  }
+
+  // ======================================================= ingredients
+  function buySelect(g) {
+    var list = T.packs[g.unit] || [], sel = 'base';
+    if (L.num(g.packQty) > 0) { sel = 'custom'; list.forEach(function (p, i) { if (Math.abs(p[1] - g.packQty) < 1e-9) sel = 'p' + i; }); }
+    var o = '<option value="base"' + (sel === 'base' ? ' selected' : '') + '>' + UNIT[g.unit] + '</option>';
+    list.forEach(function (p, i) { o += '<option value="p' + i + '"' + (sel === 'p' + i ? ' selected' : '') + '>' + p[0] + '</option>'; });
+    o += '<option value="custom"' + (sel === 'custom' ? ' selected' : '') + '>بسته با اندازهٔ دلخواه</option>';
+    return o;
+  }
+  function ingRow(g) {
+    var ch = '';
+    if (g.prevPrice != null && g.prevPrice !== g.price && g.prevPrice > 0) { var pp = (g.price / g.prevPrice - 1) * 100; ch += '<span class="chg ' + (pp > 0 ? 'up' : 'down') + '">' + (pp > 0 ? '+' : '') + pct(pp) + '</span> '; }
+    var rs = L.rise(g); if (rs && Math.abs(rs.pct) >= 1) ch += '<span class="chip ' + (rs.pct > 0 ? 'up' : 'down') + '">' + (rs.pct > 0 ? '+' : '') + pct(rs.pct) + ' در ' + rs.days + ' روز</span>';
+    var packMode = L.num(g.packQty) > 0;
+    var h = '<div class="item" data-id="' + g.id + '">' +
+      '<div class="rowx"><div class="grow"><input data-f="ing-name" value="' + esc(g.name) + '" placeholder="نام ماده" aria-label="نام ماده"></div><button class="x" data-act="ing-del" aria-label="حذف ماده">' + ICON('trash') + '</button></div>' +
+      '<div class="grid2" style="margin-top:8px"><div><span class="lbl">قیمت بر اساس</span><select data-f="ing-unit" aria-label="واحد">' + unitOpts(g.unit) + '</select></div>' +
+      '<div><span class="lbl">روش خرید</span><select data-f="ing-buy" aria-label="روش خرید">' + buySelect(g) + '</select></div></div>';
+    if (packMode) {
+      h += '<div class="grid2" style="margin-top:8px"><div><span class="lbl">در هر بسته چند ' + UNAME[g.unit] + '</span>' + numField('ing-pqty', g.packQty, ' aria-label="اندازهٔ بسته"') + '</div>' +
+        '<div><span class="lbl">قیمت یک بسته</span>' + numField('ing-ppack', g.packPrice || '', ' aria-label="قیمت بسته"', true) + '</div></div>' +
+        '<div class="gnote" style="margin-top:2px"><span>' + UNIT[g.unit] + ': <b>' + fmt(g.price) + '</b> تومان</span></div>';
+    } else {
+      h += '<div style="margin-top:8px"><span class="lbl">قیمت ' + UNIT[g.unit] + '</span>' + numField('ing-price', g.price, ' aria-label="قیمت"', true) + '</div>';
+    }
+    if (showSw('loss')) h += '<div style="margin-top:4px"><span class="lbl">ضایعات (%) مثل پوست، استخوان، پرت</span>' + numField('ing-loss', g.loss || '', ' max="90" placeholder="0"') + '</div>';
+    h += '<div class="rowx" style="margin-top:4px;align-items:center;justify-content:space-between"><label class="switch"><input type="checkbox" data-f="ing-trim"' + (g.trimmable !== false ? ' checked' : '') + '> مقدارش قابل کم‌کردن باشد</label><span>' + ch + '</span></div></div>';
+    return h;
+  }
+  function ingList() {
+    var term = q.ing.trim(), rows = state.ingredients.filter(function (g) { return !term || (g.name || '').indexOf(term) >= 0; });
+    if (!rows.length && term) return '<p class="mute" style="text-align:center">موردی پیدا نشد.</p>';
+    return rows.map(ingRow).join('');
+  }
+  function viewIngs() {
+    var h = lead('قیمت امروز مواد', 'هر وقت قیمتی عوض شد، همین‌جا عدد را اصلاح کنید؛ بقیه خودکار حساب می‌شود.');
+    h += reminderBanner();
+    if (!state.ingredients.length) return h + empty('هنوز ماده‌ای ندارید', 'با راه‌اندازی، فهرست آمادهٔ نوع کسب‌وکارتان را بگیرید، یا مواد را یکی‌یکی وارد کنید.', [['go-setup', 'راه‌اندازی بر اساس نوع کسب‌وکار', true], ['ing-add', 'افزودن ماده']]);
+    if (state.ingredients.length > 6) h += '<input class="search" data-f="q-ing" type="search" placeholder="جستجوی ماده" value="' + esc(q.ing) + '" aria-label="جستجو">';
+    h += '<div id="list">' + ingList() + '</div>';
     h += '<button class="btn pri block" data-act="ing-add">' + ICON('plus') + 'ماده جدید</button>';
     return h;
   }
 
-  function viewMenu() {
-    var h = lead('غذاهای شما', 'برای هر غذا بنویسید چه موادی و چقدر در آن می‌رود. مقدارها را به گرم، میلی‌لیتر یا عدد بنویسید.');
-    if (!state.ingredients.length) return h + empty('اول مواد را وارد کنید', 'غذاها از روی مواد اولیه ساخته می‌شوند.', [['go-qs', 'شروع سریع', true], ['go-ing', 'رفتن به مواد اولیه']]);
-    var map = L.buildMap(state), tg = state.settings.targetFC;
-    state.items.forEach(function (it) {
-      var cost = L.itemCost(it, map), fc = it.price > 0 ? cost / it.price * 100 : 0;
-      h += '<div class="item" data-id="' + it.id + '">' +
-        '<div class="rowx"><div class="grow"><input data-f="it-name" value="' + esc(it.name) + '" placeholder="نام غذا، مثلاً پیتزا مخصوص" aria-label="نام غذا"></div><button class="x" data-act="it-del" aria-label="حذف غذا">' + ICON('trash') + '</button></div>' +
-        '<div class="grid2" style="margin-top:8px"><div><span class="lbl">قیمت فروش</span>' + numField('it-price', it.price, ' aria-label="قیمت فروش"', true) + '</div>' +
-        '<div><span class="lbl">فروش ماهانه (اختیاری)</span>' + numField('it-sales', it.sales || '', ' aria-label="فروش ماهانه"') + '</div></div>';
-      if (it.price > 0 && it.lines.length) h += '<div class="gnote" style="margin:4px 2px 8px"><span>هزینهٔ مواد: <b>' + fmt(cost) + '</b></span><span class="pill ' + (fc > tg ? 'bad' : 'ok') + '">' + pct(fc) + '</span></div>';
-      (it.lines || []).forEach(function (l, idx) {
-        var g = find(state.ingredients, l.ingId);
-        h += '<div class="line" data-line="' + idx + '"><select data-f="ln-ing" aria-label="ماده">' + ingOptions(l.ingId) + '</select>' +
-          numField('ln-amt', l.amount, ' aria-label="مقدار"') + '<span class="u">' + (g ? AMT[g.unit] : '') + '</span>' +
-          '<button class="x" data-act="ln-del" aria-label="حذف ماده از غذا">' + ICON('close') + '</button></div>';
-      });
-      h += '<button class="btn sm" data-act="ln-add">' + ICON('plus') + 'ماده در این غذا</button></div>';
-    });
-    h += '<button class="btn pri block" data-act="it-add">' + ICON('plus') + 'غذای جدید</button>';
+  // ======================================================= packaging
+  function packRow(p) {
+    return '<div class="item" data-id="' + p.id + '"><div class="rowx"><div class="grow"><input data-f="pk-name" value="' + esc(p.name) + '" placeholder="مثلاً جعبهٔ کیک" aria-label="نام"></div><button class="x" data-act="pkg-del" aria-label="حذف">' + ICON('trash') + '</button></div>' +
+      '<div style="margin-top:8px"><span class="lbl">قیمت هر عدد</span>' + numField('pk-price', p.price, ' aria-label="قیمت"', true) + '</div></div>';
+  }
+  function packList() {
+    var term = q.pk.trim(), rows = state.packs.filter(function (g) { return !term || (g.name || '').indexOf(term) >= 0; });
+    if (!rows.length && term) return '<p class="mute" style="text-align:center">موردی پیدا نشد.</p>';
+    return rows.map(packRow).join('');
+  }
+  function viewPacks() {
+    var h = lead('بسته‌بندی', 'جعبه، لیوان، کیسه، روبان و هر چیزی که همراه فروش می‌رود. بعد در هر محصول مشخص می‌کنید چندتا می‌رود.');
+    if (!state.packs.length) return h + empty('هنوز بسته‌بندی‌ای ندارید', 'مثلاً جعبه، درب لیوان یا کیسه. هزینهٔ آن‌ها هم در قیمت حساب می‌شود.', [['pkg-add', 'افزودن بسته‌بندی', true]]);
+    if (state.packs.length > 6) h += '<input class="search" data-f="q-pk" type="search" placeholder="جستجو" value="' + esc(q.pk) + '" aria-label="جستجو">';
+    h += '<div id="list">' + packList() + '</div><button class="btn pri block" data-act="pkg-add">' + ICON('plus') + 'بسته‌بندی جدید</button>';
     return h;
   }
 
+  // ======================================================= quick price (nothing saved)
+  function qcTemp() {
+    var c = C(), it = { lines: qc.lines.filter(function (l) { return l.ingId; }), pk: [], yield: Math.max(1, L.num(qc.n) || 1), mode: 'piece', price: 0, minutes: 0 };
+    var cost = L.unitCost(it, { ing: c.ing, pk: c.pk, s: { mode: 'simple', targetFC: c.s.targetFC } }) + L.num(qc.other) / it.yield;
+    var t = L.num(state.settings.targetFC) / 100;
+    return { it: it, cost: cost, sug: t > 0 ? L.roundUp(cost / t, state.settings.roundTo) : 0, target: L.num(state.settings.targetFC) };
+  }
+  function viewQuick() {
+    var h = lead('قیمت سریع', 'وقتی مشتری جلوی شماست: مواد را بزنید و قیمت پیشنهادی را ببینید. چیزی ذخیره نمی‌شود.');
+    if (!state.ingredients.length) return h + empty('اول مواد را وارد کنید', 'قیمت سریع از قیمت مواد شما حساب می‌شود.', [['go-setup', 'راه‌اندازی', true], ['go-ings', 'رفتن به مواد اولیه']]);
+    var r = qcTemp(), c = C();
+    h += '<div class="hero"><div class="k">قیمت پیشنهادی هر عدد (هدف هزینه ' + pct(r.target) + ')</div><div class="big">' + fmt(r.sug) + '<small>تومان</small></div><div class="row"><div>هزینهٔ هر عدد<b>' + fmt(r.cost) + '</b></div></div></div>';
+    h += '<div class="sec" data-grp="qc"><h3>مواد</h3>';
+    qc.lines.forEach(function (l, idx) {
+      var g = c.ing[l.ingId];
+      h += '<div class="line" data-line="' + idx + '"><select data-f="qc-ing" aria-label="ماده">' + ingOptions(l.ingId) + '</select>' + numField('qc-amt', l.amount, ' aria-label="مقدار"') + '<span class="u">' + (g ? AMT[g.unit] : '') + '</span><button class="x" data-act="qc-del" aria-label="حذف">' + ICON('close') + '</button></div>';
+    });
+    h += '<button class="btn sm" data-act="qc-add">' + ICON('plus') + 'ماده</button></div>';
+    h += '<div class="sec stack"><div class="grid2"><div><span class="lbl">از این مقدار چند عدد می‌شود؟</span>' + numField('qc-n', qc.n, ' placeholder="1"') + '</div>' +
+      '<div><span class="lbl">هزینهٔ دیگر (بسته‌بندی، دستمزد...)</span>' + numField('qc-other', qc.other || '', '', true) + '</div></div>' +
+      '<div class="grid2"><button class="btn" data-act="qc-clear">پاک‌کردن</button><button class="btn pri" data-act="qc-save">ذخیره به‌عنوان ' + W().one + '</button></div></div>';
+    return h;
+  }
+
+  // ======================================================= setup wizard
+  function wzStart() { wz = { step: 1, type: state.profile.type || '', cname: state.profile.customName || '', csw: {}, ing: {}, price: {}, pk: {}, pkp: {}, dish: {}, sell: {}, t0: now() }; }
+  function wzPick(id) {
+    var t = T.types.filter(function (x) { return x.id === id; })[0]; if (!t) return;
+    wz.type = id; wz.ing = {}; wz.pk = {}; wz.dish = {};
+    t.ing.forEach(function (k) { wz.ing[k] = true; });
+    if (id === 'other') { wz.csw = { loss: false, batch: false, sizes: false, weight: false }; }
+  }
+  function viewSetup() {
+    if (!wz) wzStart();
+    var t = T.types.filter(function (x) { return x.id === wz.type; })[0];
+    var steps = '<div class="steps"><i class="on"></i><i class="' + (wz.step >= 2 ? 'on' : '') + '"></i><i class="' + (wz.step >= 3 ? 'on' : '') + '"></i></div>';
+    var h = '';
+    if (wz.step === 1) {
+      h += lead('کسب‌وکار شما چیست؟', 'نزدیک‌ترین مورد را انتخاب کنید. نام‌ها، واحدها و فهرست مواد آماده بر اساس آن می‌آید و همه‌چیز بعداً قابل تغییر است.') + steps;
+      ['food', 'other', 'custom'].forEach(function (g) {
+        var ts = T.types.filter(function (x) { return x.g === g; });
+        if (g === 'other') h += '<div class="sub-h">غیر خوراکی (همان حساب مواد و محصول)</div>';
+        else if (g === 'food') h += '<div class="sub-h">خوراکی</div>';
+        else h += '<div class="sub-h">چیز دیگر</div>';
+        h += '<div class="typegrid">' + ts.map(function (x) { return '<label class="tile"><input type="radio" name="wztype" data-f="wz-type" data-k="' + x.id + '"' + (wz.type === x.id ? ' checked' : '') + '><span class="ck">' + ICON('check') + '</span>' + esc(x.n) + '</label>'; }).join('') + '</div>';
+      });
+      if (wz.type === 'other') {
+        h += '<div class="sec stack" style="margin-top:14px"><div><label class="lbl">اسم کسب‌وکار یا محصول</label><input data-f="wz-cname" value="' + esc(wz.cname) + '" placeholder="مثلاً عروسک‌سازی"></div><p class="mute" style="margin:0">کدام بخش‌ها را می‌خواهید؟</p>' +
+          [['loss', 'ضایعات مواد'], ['batch', 'یک دستور چند عدد می‌شود'], ['sizes', 'اندازه‌ها (کوچک و بزرگ)'], ['weight', 'فروش وزنی']].map(function (a) { return '<label class="switch"><input type="checkbox" data-f="wz-csw" data-k="' + a[0] + '"' + (wz.csw[a[0]] ? ' checked' : '') + '> ' + a[1] + '</label>'; }).join('') + '</div>';
+      }
+      h += '<button class="btn pri block" style="margin-top:14px" data-act="wz-next"' + (wz.type ? '' : ' disabled') + '>ادامه</button>';
+      if (state.profile.done) h += '<button class="btn block" style="margin-top:10px" data-act="go-prods">انصراف</button>';
+      return h;
+    }
+    if (wz.step === 2) {
+      h += lead('مواد و بسته‌بندی', 'آنچه می‌خرید را نگه دارید و آخرین قیمت خرید را بنویسید. می‌توانید قیمت را خالی بگذارید و بعداً پر کنید.') + steps;
+      if (t.hint) h += '<div class="note">' + esc(t.hint) + '</div>';
+      h += '<div class="sec"><h3>مواد اولیه</h3>';
+      t.ing.forEach(function (k) {
+        var d = T.ing[k], on = !!wz.ing[k];
+        h += '<div class="setrow"><label class="tx switch" style="color:var(--ink)"><input type="checkbox" data-f="wz-ing" data-k="' + k + '"' + (on ? ' checked' : '') + '> <span><b>' + esc(d.n) + '</b><span class="mute sm" style="display:block">' + UNIT[d.u] + (d.p ? ' · معمولاً ' + d.p[0] : '') + '</span></span></label>' + numField('wz-price', wz.price[k] == null ? '' : wz.price[k], ' data-k="' + k + '" aria-label="قیمت ' + esc(d.n) + '"', true) + '</div>';
+      });
+      h += '</div>';
+      if (t.pk.length) {
+        h += '<div class="sec"><h3>بسته‌بندی (اختیاری)</h3>';
+        t.pk.forEach(function (n) {
+          h += '<div class="setrow"><label class="tx switch" style="color:var(--ink)"><input type="checkbox" data-f="wz-pk" data-k="' + esc(n) + '"' + (wz.pk[n] ? ' checked' : '') + '> <b>' + esc(n) + '</b></label>' + numField('wz-pkp', wz.pkp[n] == null ? '' : wz.pkp[n], ' data-k="' + esc(n) + '" aria-label="قیمت ' + esc(n) + '"', true) + '</div>';
+        });
+        h += '</div>';
+      }
+      var hasDish = !!(t.dishes && T.dishes[t.dishes]);
+      h += '<div class="grid2"><button class="btn" data-act="wz-back">برگشت</button><button class="btn pri" data-act="' + (hasDish ? 'wz-next' : 'wz-finish') + '">' + (hasDish ? 'ادامه' : 'ساخت و شروع') + '</button></div>';
+      return h;
+    }
+    // step 3: starter products
+    var list = T.dishes[t.dishes] || [];
+    h += lead('چند نمونه آماده کنیم؟', 'مقدار مواد هر مورد فقط یک نمونهٔ تقریبی است و بعداً در خود ' + esc(t.one) + ' اصلاح می‌شود. قیمت فروش خودتان را بنویسید.') + steps;
+    h += '<div class="sec"><div class="tile-grid">' + list.map(function (d) { return '<label class="tile"><input type="checkbox" data-f="wz-dish" data-k="' + d.id + '"' + (wz.dish[d.id] ? ' checked' : '') + '><span class="ck">' + ICON('check') + '</span>' + esc(d.name) + '</label>'; }).join('') + '</div></div>';
+    var picked = list.filter(function (d) { return wz.dish[d.id]; });
+    if (picked.length) {
+      h += '<div class="sec"><h3>قیمت فروش (تومان)</h3>';
+      picked.forEach(function (d) { h += '<div class="setrow"><div class="tx"><b>' + esc(d.name) + '</b></div>' + numField('wz-sell', wz.sell[d.id] == null ? '' : wz.sell[d.id], ' data-k="' + d.id + '" aria-label="' + esc(d.name) + '"', true) + '</div>'; });
+      h += '</div>';
+    }
+    h += '<div class="grid2"><button class="btn" data-act="wz-back">برگشت</button><button class="btn pri" data-act="wz-finish">ساخت و شروع</button></div>';
+    return h;
+  }
+  function wzFinish() {
+    var t = T.types.filter(function (x) { return x.id === wz.type; })[0]; if (!t) return false;
+    var idByKey = {}, ts = now();
+    state.profile.type = t.id; state.profile.done = true;
+    state.profile.customName = t.id === 'other' ? (wz.cname || '').trim() : '';
+    var swv = { loss: false, batch: false, sizes: false, weight: false };
+    var src = t.id === 'other' ? wz.csw : t.sw;
+    for (var k in swv) swv[k] = !!(src && src[k]);
+    state.settings.sw = swv; touchSettings();
+    t.ing.forEach(function (key) {
+      if (!wz.ing[key]) return;
+      var d = T.ing[key], p = L.num(wz.price[key]), g = state.ingredients.filter(function (x) { return x.name === d.n; })[0];
+      if (!g) { g = { id: uid(), name: d.n, unit: d.u, price: 0, trimmable: true, u: ts }; state.ingredients.push(g); }
+      if (p > 0) setPrice(g, p);
+      idByKey[key] = g.id;
+    });
+    t.pk.forEach(function (n) {
+      if (!wz.pk[n]) return;
+      var g = state.packs.filter(function (x) { return x.name === n; })[0];
+      if (!g) { g = { id: uid(), name: n, price: 0, u: ts }; state.packs.push(g); }
+      var p = L.num(wz.pkp[n]); if (p > 0 && p !== g.price) { g.price = p; touch(g); }
+    });
+    var list = T.dishes[t.dishes] || [];
+    list.forEach(function (d) {
+      if (!wz.dish[d.id]) return;
+      var lines = d.lines.map(function (l) {
+        var def = T.ing[l[0]], g = idByKey[l[0]] ? find(state.ingredients, idByKey[l[0]]) : state.ingredients.filter(function (x) { return x.name === def.n; })[0];
+        if (!g) { g = { id: uid(), name: def.n, unit: def.u, price: 0, trimmable: true, u: ts }; state.ingredients.push(g); }
+        return { ingId: g.id, amount: l[1] };
+      });
+      var it = state.items.filter(function (x) { return x.name === d.name; })[0], price = L.num(wz.sell[d.id]);
+      if (!it) { it = { id: uid(), name: d.name, price: price, sales: 0, yield: 1, mode: 'piece', lines: lines, pk: [], u: ts }; state.items.push(it); }
+      else if (price > 0) { it.price = price; touch(it); }
+    });
+    if (state.meta.setupSeconds == null && wz.t0) state.meta.setupSeconds = (now() - wz.t0) / 1000;
+    state.meta.setups++;
+    wz = null; return true;
+  }
+
+  // ======================================================= price change (kept from the old version)
+  function viewChg() {
+    var h = lead('قیمت‌ها عوض شد؟', 'فقط قیمت موادی را که عوض شده بنویسید و یک بار «ثبت» را بزنید. بقیه را خالی بگذارید.');
+    if (!state.ingredients.length) return h + empty('هنوز ماده‌ای ندارید', 'اول مواد را وارد کنید.', [['go-setup', 'راه‌اندازی', true], ['go-ings', 'رفتن به مواد اولیه']]);
+    h += reminderBanner();
+    h += '<div class="sec">';
+    state.ingredients.forEach(function (g) {
+      h += '<div class="setrow"><div class="tx"><b>' + esc(g.name) + '</b><span class="mute sm">الان ' + fmt(g.price) + ' ' + UNIT[g.unit] + '</span></div>' + numField('up-price', upd[g.id] != null ? upd[g.id] : '', ' data-k="' + g.id + '" placeholder="قیمت جدید" aria-label="قیمت جدید ' + esc(g.name) + '"', true) + '</div>';
+    });
+    h += '<p class="hintline">اگر ماده را بسته‌ای می‌خرید، اینجا قیمت ' + 'هر کیلو/لیتر/عدد را بنویسید، یا در «مواد اولیه» قیمت بسته را عوض کنید.</p>';
+    h += '<button class="btn pri block" style="margin-top:12px" data-act="up-go">ثبت قیمت‌های جدید</button></div>';
+    var c = L.changes(state);
+    if (!c.ingredients.length) return h + '<div class="note">هنوز تغییر قیمتی ثبت نشده است. بعد از ثبت قیمت جدید، اینجا می‌بینید چه چیزی گران شد و کدام محصول‌ها را اذیت کرد.</div>';
+    h += '<div class="sec"><h3>چه چیزی عوض شد</h3>';
+    c.ingredients.forEach(function (g) {
+      h += '<div class="listrow"><div class="tx"><b>' + esc(g.name) + '</b><span class="mute sm" style="display:block">از ' + fmt(g.prev) + ' به ' + fmt(g.now) + '</span></div><span class="chg ' + (g.pct > 0 ? 'up' : 'down') + '">' + (g.pct > 0 ? '+' : '') + pct(g.pct) + '</span></div>';
+    });
+    h += '</div><div class="sec"><h3>اثر روی ' + W().many + '</h3>';
+    var any = false;
+    c.items.forEach(function (x) {
+      if (Math.abs(x.delta) < 1e-9) return; any = true;
+      h += '<div class="listrow"><div class="tx"><b>' + esc(x.name) + '</b>' + (x.crossed ? ' <span class="pill bad">از هدف گذشت</span>' : '') +
+        '<span class="mute sm" style="display:block">هزینه از ' + fmt(x.costPrev) + ' به ' + fmt(x.costNow) + ' · سهم هزینه از ' + pct(x.fcPrev * 100) + ' به ' + pct(x.fcNow * 100) + '</span>' +
+        (x.cause ? '<span class="cause" style="display:block">بیشترین علت: ' + esc(x.cause) + '</span>' : '') + '</div></div>';
+    });
+    if (!any) h += '<p class="mute">قیمت هیچ موردی تغییری نکرد.</p>';
+    h += '<p class="mute" style="margin-top:10px">برای دیدن پیشنهاد، به «پیشنهاد قیمت» بروید.</p></div>';
+    h += '<div class="sec"><button class="btn block" data-act="share">متن خلاصه برای کارکنان یا شریک</button><div id="sharebox"></div></div>';
+    return h;
+  }
+  function shareText() {
+    var c = L.changes(state), cx = C(), out = [];
+    out.push('خلاصهٔ تغییر قیمت مواد:');
+    c.ingredients.forEach(function (g) { out.push('• ' + g.name + ': ' + fmt(g.prev) + ' ← ' + fmt(g.now) + ' (' + (g.pct > 0 ? '+' : '') + pct(g.pct) + ')'); });
+    var over = c.items.filter(function (x) { return x.over; });
+    if (over.length) {
+      out.push('', 'مواردی که سهم هزینه از هدف بالاتر است:');
+      over.forEach(function (x) {
+        var it = find(state.items, x.id), r = L.scenarios(it, cx, state.subs);
+        out.push('• ' + x.name + ': ' + pct(x.fcNow * 100) + '، حداقل قیمت برای رسیدن به هدف: ' + fmt(r.scenarios.raise.price));
+      });
+    } else out.push('', 'همه در محدودهٔ هدف هستند.');
+    return out.join('\n');
+  }
+
+  // ======================================================= all products: suggestions
+  function viewRes() {
+    var c = C(), s = state.settings, w = W();
+    if (!state.items.length) return lead('اینجا پیشنهاد قیمت می‌بینید', 'اول ' + w.many + ' و قیمت موادشان را وارد کنید.') + empty('هنوز ' + w.one + 'ی ندارید', 'چند مورد پرفروش را بسازید تا ببینید کدام سود کمتری دارد.', [['go-setup', 'راه‌اندازی', true], ['demo', 'نمونهٔ آماده را ببینم']]);
+    var rows = state.items.map(function (it) { return { it: it, r: L.scenarios(it, c, state.subs) }; });
+    rows.sort(function (a, b) { return ((b.r.over ? 1 : 0) - (a.r.over ? 1 : 0)) || ((isFinite(b.r.fc) ? b.r.fc : 0) - (isFinite(a.r.fc) ? a.r.fc : 0)); });
+    var nOver = rows.filter(function (x) { return x.r.over; }).length;
+    var h = lead(nOver ? nOver + ' مورد از هدف هزینه بالاتر رفته' : 'همه در محدودهٔ هدف‌اند', 'هدف شما: هزینه ' + s.targetFC + '% قیمت فروش');
+    rows.forEach(function (x) {
+      var it = x.it, r = x.r, fc = isFinite(r.fc) ? r.fc : 0, tgt = r.target / 100;
+      var scale = Math.max(tgt * 1.7, fc * 1.05, 0.01), wd = Math.min(fc / scale, 1) * 100, tp = tgt / scale * 100;
+      var b = r.scenarios[r.best], unit = r.hasSales ? 'سود ماهانه' : 'سود هر واحد';
+      h += '<article class="dish' + (r.over ? ' over' : '') + '">' +
+        '<div class="leader"><span class="nm">' + esc(it.name || '(بدون نام)') + '</span><span class="dots"></span><span class="pr">' + fmt(it.price) + '</span></div>' +
+        '<div class="gauge' + (r.over ? ' over' : '') + '" role="img" aria-label="سهم هزینه ' + pct(fc * 100) + '"><i style="width:' + wd.toFixed(1) + '%"></i><u style="right:' + tp.toFixed(1) + '%"></u></div>' +
+        '<div class="gnote"><span>هزینه <b>' + pct(fc * 100) + '</b> (' + fmt(r.cost) + ')</span><span>هدف ' + pct(r.target) + '</span></div>';
+      if (!r.over) h += '<div class="okline">' + ICON('check') + 'در محدودهٔ هدف است؛ تغییری لازم نیست.</div>';
+      else {
+        var head = r.best === 'raise' ? 'قیمت را به ' + fmt(b.price) + ' برسانید' : r.best === 'keep' ? 'قیمت را نگه دارید و مواد را اصلاح کنید' : 'تغییر ندهید؛ با افت فروش احتمالی، سود بهتری ندارد';
+        h += '<div class="ticket"><b>' + head + '</b><span>' + unit + ': ' + fmt(b.profit) + (r.best !== 'nothing' ? ' (بدون تغییر: ' + fmt(r.scenarios.nothing.profit) + ')' : '') + '</span></div>';
+        if (r.explain.length && r.explain[0].delta > 0) h += '<p class="cause">بیشترین علت: ' + esc(r.explain[0].name) + '، ' + pct(r.explain[0].pct) + ' گران‌تر شده</p>';
+      }
+      h += '<button class="btn sm" style="margin-top:8px" data-act="open" data-id="' + it.id + '">جزئیات و گزینه‌ها</button></article>';
+    });
+    h += '<div class="note">پیشنهادها تقریبی‌اند. افت فروش با ضریب حساسیت ' + s.elasticity + ' فرض شده و باید با فروش واقعی خودتان اصلاح شود. تغییر مواد را قبل از اجرا خودتان تأیید کنید.</div>';
+    return h;
+  }
+
+  // ======================================================= substitutions (kept)
   function viewSub() {
     var h = lead('جایگزین‌های مجاز', 'مثلاً «به‌جای بخشی از پنیر پیتزا، پنیر پروسسی بگذارم». برنامه فقط از جایگزین‌هایی استفاده می‌کند که شما تأیید کرده‌اید.');
     if (!state.subs.length) h += '<div class="note">هنوز جایگزینی تعریف نشده است. بدون آن، پیشنهادها فقط بالا بردن قیمت یا کم‌کردن مقدار مواد است.</div>';
@@ -103,236 +539,151 @@
         '<div><span class="lbl">این را بگذار</span><select data-f="sb-to">' + ingOptions(s.toId) + '</select></div></div>' +
         '<button class="x" data-act="sb-del" aria-label="حذف جایگزین">' + ICON('trash') + '</button></div>' +
         '<div class="grid2" style="margin-top:10px"><div><span class="lbl">نسبت مقدار</span>' + numField('sb-ratio', s.ratio, ' step="0.1"') + '</div>' +
-        '<div><span class="lbl">حداکثر سهم (٪)</span>' + numField('sb-share', s.maxShare, ' max="100"') + '</div></div></div>';
+        '<div><span class="lbl">حداکثر سهم (%)</span>' + numField('sb-share', s.maxShare, ' max="100"') + '</div></div></div>';
     });
     h += '<button class="btn pri block" data-act="sb-add">' + ICON('plus') + 'جایگزین جدید</button>';
     return h;
   }
 
-  function viewRes() {
-    var map = L.buildMap(state), s = state.settings, tgt = s.targetFC / 100;
-    if (!state.items.length) return lead('اینجا پیشنهاد قیمت می‌بینید', 'اول غذاها و قیمت موادشان را وارد کنید.') + empty('هنوز غذایی ندارید', 'در دو دقیقه چند غذای پرفروش را بسازید تا ببینید کدام سود کمتری دارد.', [['go-qs', 'شروع سریع', true], ['demo', 'نمونهٔ آماده را ببینم']]);
-    var rows = state.items.map(function (it) { return { it: it, r: L.scenarios(it, map, s, state.subs) }; });
-    rows.sort(function (a, b) { return ((b.r.over ? 1 : 0) - (a.r.over ? 1 : 0)) || ((isFinite(b.r.fc) ? b.r.fc : 0) - (isFinite(a.r.fc) ? a.r.fc : 0)); });
-    var nOver = rows.filter(function (x) { return x.r.over; }).length;
-    var h = lead(nOver ? nOver + ' غذا از هدف هزینه بالاتر رفته' : 'همهٔ غذاها در محدودهٔ هدف‌اند', 'هدف شما: هزینهٔ مواد ' + s.targetFC + '٪ قیمت فروش');
-    var names = { nothing: 'تغییر نمی‌دهم', raise: 'قیمت را بالا می‌برم', keep: 'قیمت را نگه می‌دارم و مواد را اصلاح می‌کنم' };
-    rows.forEach(function (x) {
-      var it = x.it, r = x.r, fc = isFinite(r.fc) ? r.fc : 0;
-      var scale = Math.max(tgt * 1.7, fc * 1.05, 0.01), w = Math.min(fc / scale, 1) * 100, tp = tgt / scale * 100;
-      var unit = r.hasSales ? 'سود ماهانه' : 'سود هر واحد', ex = r.explain;
-      h += '<article class="dish' + (r.over ? ' over' : '') + '">' +
-        '<div class="leader"><span class="nm">' + esc(it.name || '(بدون نام)') + '</span><span class="dots"></span><span class="pr">' + fmt(it.price) + '</span></div>' +
-        '<div class="gauge' + (r.over ? ' over' : '') + '" role="img" aria-label="هزینهٔ مواد ' + pct(fc * 100) + ' از قیمت فروش"><i style="width:' + w.toFixed(1) + '%"></i><u style="right:' + tp.toFixed(1) + '%"></u></div>' +
-        '<div class="gnote"><span>هزینهٔ مواد <b>' + pct(fc * 100) + '</b> (' + fmt(r.cost) + ')</span><span>هدف ' + s.targetFC + '٪</span></div>';
-      if (!r.over) {
-        h += '<div class="okline">' + ICON('check') + 'در محدودهٔ هدف است؛ تغییری لازم نیست.</div>';
-      } else {
-        var b = r.scenarios[r.best], head = r.best === 'raise' ? 'قیمت را به ' + fmt(b.price) + ' برسانید' : r.best === 'keep' ? 'قیمت را نگه دارید و مواد را اصلاح کنید' : 'تغییر ندهید؛ با افت فروش احتمالی، سود بهتری ندارد';
-        h += '<div class="ticket"><b>' + head + '</b><span>' + unit + ': ' + fmt(b.profit) + (r.best !== 'nothing' ? ' (بدون تغییر: ' + fmt(r.scenarios.nothing.profit) + ')' : '') + '</span></div>';
-        if (ex.length && ex[0].delta > 0) h += '<p class="cause">بیشترین علت: ' + esc(ex[0].name) + '، ' + pct(ex[0].pct) + ' گران‌تر شده (+' + fmt(ex[0].delta) + ' برای هر واحد)</p>';
-        h += '<details><summary>همهٔ گزینه‌ها و جزئیات</summary>';
-        ['nothing', 'raise', 'keep'].forEach(function (k) {
-          var o = r.scenarios[k];
-          h += '<div class="opt' + (r.best === k ? ' best' : '') + '"><div class="t">' + names[k] + (r.best === k ? ' ✓' : '') + '</div>' +
-            '<div><span class="k">قیمت</span><span class="v">' + fmt(o.price) + '</span></div><div><span class="k">هزینه</span><span class="v">' + fmt(o.cost) + '</span></div><div><span class="k">' + unit + '</span><span class="v">' + fmt(o.profit) + '</span></div></div>';
-        });
-        if (r.plan.actions.length) {
-          h += '<p style="margin:12px 0 2px"><b>اگر قیمت را نگه دارید:</b></p><ul class="plan">';
-          r.plan.actions.forEach(function (a) {
-            if (a.type === 'swap') h += '<li>' + Math.round(a.amountFrom) + ' از «' + esc(a.fromName) + '» (' + pct(a.percent) + ' آن) را با ' + Math.round(a.amountTo) + ' از «' + esc(a.toName) + '» عوض کنید؛ صرفه‌جویی ' + fmt(a.saving) + ' برای هر واحد</li>';
-            else h += '<li>«' + esc(a.name) + '» را ' + pct(a.percent) + ' کم کنید (از ' + Math.round(a.amountFrom) + ' به ' + Math.round(a.amountTo) + ')؛ صرفه‌جویی ' + fmt(a.saving) + ' برای هر واحد</li>';
-          });
-          h += '</ul>';
-          if (r.plan.needsPriceRise) h += '<div class="note warn">این کم‌کردن‌ها کافی نیست؛ برای رسیدن به هدف، قیمت باید حداقل ' + fmt(r.plan.priceNeeded) + ' شود.</div>';
-        } else if (r.plan.needsPriceRise) h += '<div class="note warn">جایگزین یا کم‌کردن مجازی تعریف نشده است؛ فقط افزایش قیمت باقی می‌ماند.</div>';
-        h += '</details>';
-      }
-      h += '</article>';
+  // ======================================================= price cards
+  function viewCards() {
+    var s = state.settings, w = W();
+    var h = lead('کارت و فهرست قیمت', 'یک تصویر آماده برای اینستاگرام، بله یا ایتا بسازید و با یک لمس بفرستید. هزینه و سود شما در آن نمی‌آید.');
+    if (!state.items.length) return h + empty('هنوز ' + w.one + 'ی ندارید', 'اول چند مورد با قیمت فروش بسازید.', [['go-prods', 'رفتن به ' + w.many, true]]);
+    if (!cardOpt.pick) { cardOpt.pick = {}; state.items.forEach(function (it) { cardOpt.pick[it.id] = L.num(it.price) > 0; }); }
+    h += '<div class="sec stack"><div><label class="lbl" for="shopname">نام مغازه یا برند</label><input id="shopname" data-f="shop" value="' + esc(s.shopName) + '" placeholder="مثلاً شیرینی ..."></div>' +
+      '<div><label class="lbl" for="shopcontact">تماس یا آیدی (پایین کارت)</label><input id="shopcontact" data-f="contact" value="' + esc(s.contact) + '" placeholder="مثلاً @mybakery  |  0915..." dir="ltr" style="text-align:right"></div>' +
+      '<div><span class="lbl">رنگ</span><div class="themes">' + Object.keys(CARD.themes).map(function (k) { return '<button data-act="theme" data-k="' + k + '" class="' + (cardOpt.theme === k ? 'on' : '') + '">' + CARD.themes[k].name + '</button>'; }).join('') + '</div></div>';
+    if (full()) h += '<label class="switch"><input type="checkbox" data-f="card-whole"' + (cardOpt.wholesale ? ' checked' : '') + '> به‌جای قیمت فروش، قیمت عمده را بگذار</label>';
+    h += '</div><div class="sec"><h3>کدام موارد در فهرست باشند؟</h3>';
+    state.items.forEach(function (it) {
+      var p = cardOpt.wholesale ? L.num(it.wholesale) : L.num(it.price);
+      h += '<div class="setrow"><label class="tx switch" style="color:var(--ink)"><input type="checkbox" data-f="card-pick" data-k="' + it.id + '"' + (cardOpt.pick[it.id] && p > 0 ? ' checked' : '') + (p > 0 ? '' : ' disabled') + '> <b>' + esc(it.name || '(بدون نام)') + '</b></label><span style="direction:ltr;font-weight:700">' + (p > 0 ? fmt(p) : 'بدون قیمت') + '</span></div>';
     });
-    h += '<div class="note">پیشنهادها تقریبی‌اند. افت فروش با ضریب حساسیت ' + s.elasticity + ' فرض شده و باید با فروش واقعی خودتان اصلاح شود. تغییر مواد را قبل از اجرا خودتان تأیید کنید.</div>';
+    h += '<button class="btn pri block" style="margin-top:12px" data-act="card-list">ساخت تصویر فهرست قیمت</button></div>';
     return h;
   }
-
-
-  // ---------- quick start ----------
-  function qsNeeded() {
-    var need = {};
-    T.dishes.forEach(function (d) { if (qs.dishes[d.id]) d.lines.forEach(function (l) { need[l[0]] = true; }); });
-    return Object.keys(need);
+  function cardRows(ids) {
+    return ids.map(function (id) { var it = find(state.items, id); if (!it) return null; var p = cardOpt.wholesale && ids.length > 1 ? L.num(it.wholesale) : L.num(it.price); return p > 0 ? { name: it.name, price: p, unit: it.mode === 'kg' ? 'هر کیلوگرم' : '' } : null; }).filter(Boolean);
   }
-  function viewQs() {
-    if (qs.t0 == null) qs.t0 = Date.now();
-    var need = qsNeeded(), picked = T.dishes.some(function (d) { return qs.dishes[d.id]; });
-    var h = lead('در دو دقیقه آماده شوید', 'غذاهایتان را انتخاب کنید، قیمت‌ها را بنویسید و نتیجه را ببینید. مقدار مواد هر غذا نمونهٔ تقریبی است و بعداً در «منوی غذاها» اصلاح می‌شود.');
-    h += '<div class="steps"><i class="on"></i><i class="' + (picked ? 'on' : '') + '"></i><i></i></div>';
-    h += '<div class="sec"><h3>چه غذاهایی می‌فروشید؟</h3><div class="tile-grid" style="margin-top:10px">';
-    T.dishes.forEach(function (d) {
-      h += '<label class="tile"><input type="checkbox" data-f="qs-dish" data-k="' + d.id + '"' + (qs.dishes[d.id] ? ' checked' : '') + '><span class="ck">' + ICON('check') + '</span>' + esc(d.name) + '</label>';
-    });
-    h += '</div></div>';
-    if (need.length) {
-      h += '<div class="sec"><h3>قیمت مواد</h3><p class="mute">آخرین قیمت خرید شما، به تومان</p>';
-      need.forEach(function (k) {
-        var c = T.catalog[k], ex = state.ingredients.filter(function (g) { return g.name === c.name; })[0];
-        var v = qs.prices[k] != null ? qs.prices[k] : (ex ? ex.price : '');
-        h += '<div class="setrow"><div class="tx"><b>' + esc(c.name) + '</b><span class="mute sm">' + UNIT[c.unit] + '</span></div>' + numField('qs-price', v, ' data-k="' + k + '" aria-label="' + esc(c.name) + '"', true) + '</div>';
-      });
-      h += '</div><div class="sec"><h3>قیمت فروش هر غذا</h3><p class="mute">به تومان</p>';
-      T.dishes.forEach(function (d) {
-        if (!qs.dishes[d.id]) return;
-        var ex = state.items.filter(function (it) { return it.name === d.name; })[0];
-        var v = qs.sell[d.id] != null ? qs.sell[d.id] : (ex ? ex.price : '');
-        h += '<div class="setrow"><div class="tx"><b>' + esc(d.name) + '</b></div>' + numField('qs-sell', v, ' data-k="' + d.id + '" aria-label="' + esc(d.name) + '"', true) + '</div>';
-      });
-      h += '</div><button class="btn pri block" data-act="qs-go">محاسبه و نمایش نتیجه</button>';
-    } else h += '<p class="mute" style="text-align:center">حداقل یک غذا را انتخاب کنید.</p>';
-    if (state.meta.setupSeconds != null) h += '<p class="mute sm" style="text-align:center;margin-top:12px">آخرین راه‌اندازی: ' + Math.round(state.meta.setupSeconds) + ' ثانیه</p>';
-    h += '<div class="sec" style="margin-top:16px"><p class="mute" style="margin:0 0 10px">غذایتان در فهرست نیست؟ از «منوی غذاها» خودتان اضافه کنید.</p><button class="btn block" data-act="demo">نمونهٔ آماده را ببینم</button></div>';
-    return h;
-  }
-  function qsApply() {
-    var need = qsNeeded(), miss = [];
-    need.forEach(function (k) { if (!(Number(qs.prices[k]) > 0) && !(findByName(state.ingredients, T.catalog[k].name))) miss.push(T.catalog[k].name); });
-    T.dishes.forEach(function (d) { if (qs.dishes[d.id] && !(Number(qs.sell[d.id]) > 0) && !findByName(state.items, d.name)) miss.push('قیمت فروش ' + d.name); });
-    if (miss.length) { alert('این موارد را پر کنید:\n' + miss.join('\n')); return false; }
-    var idOf = {};
-    need.forEach(function (k) {
-      var c = T.catalog[k], g = findByName(state.ingredients, c.name), p = Number(qs.prices[k]);
-      if (!g) { g = { id: uid(), name: c.name, unit: c.unit, price: p > 0 ? p : 0, trimmable: true }; state.ingredients.push(g); }
-      else if (p > 0 && p !== g.price) { g.prevPrice = g.price; g.price = p; }
-      idOf[k] = g.id;
-    });
-    T.dishes.forEach(function (d) {
-      if (!qs.dishes[d.id]) return;
-      var price = Number(qs.sell[d.id]), it = findByName(state.items, d.name);
-      if (!it) { it = { id: uid(), name: d.name, price: price, sales: 0, lines: [] }; state.items.push(it); }
-      else if (price > 0) it.price = price;
-      if (!it.lines.length) it.lines = d.lines.map(function (l) { return { ingId: idOf[l[0]], amount: l[1] }; });
-    });
-    if (state.meta.setupSeconds == null && qs.t0) state.meta.setupSeconds = (Date.now() - qs.t0) / 1000;
-    state.meta.setups++;
-    qs = { dishes: {}, prices: {}, sell: {}, t0: null };
-    return true;
-  }
-  function findByName(arr, name) { return arr.filter(function (x) { return x.name === name; })[0]; }
-
-  // ---------- what changed ----------
-  function viewChg() {
-    var h = lead('قیمت‌ها عوض شد؟', 'فقط قیمت موادی را که عوض شده بنویسید و یک بار «ثبت» را بزنید. بقیه را خالی بگذارید.');
-    if (!state.ingredients.length) return h + empty('هنوز ماده‌ای ندارید', 'اول مواد را وارد کنید.', [['go-qs', 'شروع سریع', true]]);
-    h += '<div class="sec">';
-    state.ingredients.forEach(function (g) {
-      h += '<div class="setrow"><div class="tx"><b>' + esc(g.name) + '</b><span class="mute sm">الان ' + fmt(g.price) + '</span></div>' + numField('up-price', upd[g.id] != null ? upd[g.id] : '', ' data-k="' + g.id + '" placeholder="قیمت جدید" aria-label="قیمت جدید ' + esc(g.name) + '"', true) + '</div>';
-    });
-    h += '<button class="btn pri block" style="margin-top:12px" data-act="up-go">ثبت قیمت‌های جدید</button></div>';
-    var c = L.changes(state);
-    if (!c.ingredients.length) return h + '<div class="note">هنوز تغییر قیمتی ثبت نشده است. بعد از ثبت قیمت جدید، اینجا می‌بینید چه چیزی گران شد و کدام غذاها را اذیت کرد.</div>';
-    h += '<div class="sec"><h3>چه چیزی عوض شد</h3>';
-    c.ingredients.forEach(function (g) {
-      h += '<div class="listrow"><div class="tx"><b>' + esc(g.name) + '</b><span class="mute sm" style="display:block">از ' + fmt(g.prev) + ' به ' + fmt(g.now) + '</span></div><span class="chg ' + (g.pct > 0 ? 'up' : 'down') + '">' + (g.pct > 0 ? '+' : '') + pct(g.pct) + '</span></div>';
-    });
-    h += '</div><div class="sec"><h3>اثر روی غذاها</h3>';
-    var any = false;
-    c.items.forEach(function (x) {
-      if (Math.abs(x.delta) < 1e-9) return; any = true;
-      h += '<div class="listrow"><div class="tx"><b>' + esc(x.name) + '</b>' + (x.crossed ? ' <span class="pill bad">از هدف گذشت</span>' : '') +
-        '<span class="mute sm" style="display:block">هزینه از ' + fmt(x.costPrev) + ' به ' + fmt(x.costNow) + ' · سهم مواد از ' + pct(x.fcPrev * 100) + ' به ' + pct(x.fcNow * 100) + '</span>' +
-        (x.cause ? '<span class="cause" style="display:block">بیشترین علت: ' + esc(x.cause) + '</span>' : '') + '</div></div>';
-    });
-    if (!any) h += '<p class="mute">قیمت غذاها تغییری نکرد.</p>';
-    h += '<p class="mute" style="margin-top:10px">برای دیدن پیشنهاد، به «نتیجه و پیشنهاد» بروید.</p></div>';
-    h += '<div class="sec"><button class="btn block" data-act="share">متن خلاصه برای کارکنان یا شریک</button><div id="sharebox"></div></div>';
-    return h;
-  }
-  function shareText() {
-    var c = L.changes(state), map = L.buildMap(state), s = state.settings, out = [];
-    out.push('خلاصهٔ تغییر قیمت مواد:');
-    c.ingredients.forEach(function (g) { out.push('• ' + g.name + ': ' + fmt(g.prev) + ' ← ' + fmt(g.now) + ' (' + (g.pct > 0 ? '+' : '') + pct(g.pct) + ')'); });
-    var over = c.items.filter(function (x) { return x.over; });
-    if (over.length) {
-      out.push('', 'غذاهایی که هزینهٔ مواد از هدف (' + s.targetFC + '٪) بالاتر است:');
-      over.forEach(function (x) {
-        var it = state.items.filter(function (y) { return y.id === x.id; })[0], r = L.scenarios(it, map, s, state.subs);
-        out.push('• ' + x.name + ': ' + pct(x.fcNow * 100) + '، حداقل قیمت برای رسیدن به هدف: ' + fmt(r.scenarios.raise.price));
-      });
-    } else out.push('', 'همهٔ غذاها در محدودهٔ هدف هستند.');
-    return out.join('\n');
+  function makeCard(kind, rows, sub) {
+    if (!rows.length) { alert('قیمتی برای نمایش نیست.'); return; }
+    var s = state.settings;
+    CARD.make({ kind: kind, shop: s.shopName || NAME, contact: s.contact, theme: cardOpt.theme, sub: sub, rows: rows }).then(function (cv) {
+      return Promise.all(cv.map(CARD.toBlob));
+    }).then(function (blobs) {
+      closeSheet(); urls = blobs.map(function (b) { return URL.createObjectURL(b); });
+      var html = '<div class="sheet" role="dialog" aria-label="پیش‌نمایش"><h3>پیش‌نمایش</h3>' + urls.map(function (u) { return '<img class="cardprev" src="' + u + '" alt="پیش‌نمایش کارت">'; }).join('') +
+        '<button class="btn pri block" data-sheet="card-send">' + ICON('share') + 'ارسال یا ذخیره</button><button class="btn block" data-sheet="close" style="margin-top:10px">بستن</button></div>';
+      openSheet(html); window._cardBlobs = blobs;
+    }).catch(function () { alert('ساخت تصویر ممکن نشد.'); });
   }
 
+  // ======================================================= settings
   function viewSet() {
     var s = state.settings;
     function f(key, label, hint) { return '<div class="setrow"><div class="tx"><b>' + label + '</b><span class="mute sm">' + hint + '</span></div><div class="fld"><input type="number" step="any" inputmode="decimal" data-f="st-' + key + '" value="' + s[key] + '"></div></div>'; }
-    return lead('تنظیمات محاسبه', 'این عددها پیشنهادها را شکل می‌دهند؛ برای کسب‌وکار خودتان تنظیم کنید.') +
-      '<div class="sec">' +
-      f('targetFC', 'هدف هزینهٔ مواد (٪ قیمت فروش)', 'معمولاً بین ۲۸ تا ۳۵') +
-      f('minPortion', 'حداقل مقدار مجاز (٪ مقدار فعلی)', 'مثلاً ۸۵ یعنی تا ۱۵٪ کم‌کردن مجاز است') +
-      f('roundTo', 'رند کردن قیمت به (تومان)', 'مثلاً ۱۰۰۰ یا ۵۰۰۰') +
-      f('elasticity', 'حساسیت مشتری به گرانی', '۱٫۲ یعنی ۱۰٪ گرانی ≈ ۱۲٪ کاهش فروش') +
-      f('qualityDrop', 'افت فروش بر اثر کم‌کردن مواد (٪)', 'اگر کیفیت کمی پایین بیاید') + '</div>' +
-      '<div class="sec stack"><h3>اطلاعات</h3>' +
+    var t = curType();
+    var h = lead('تنظیمات', 'این عددها پیشنهادها را شکل می‌دهند؛ برای کسب‌وکار خودتان تنظیم کنید.');
+    h += '<div class="sec stack"><h3>حالت</h3><div class="seg"><button data-act="mode-simple" class="' + (s.mode !== 'full' ? 'on' : '') + '">ساده</button><button data-act="mode-full" class="' + (s.mode === 'full' ? 'on' : '') + '">کامل</button></div>' +
+      '<p class="mute" style="margin:0">' + (s.mode === 'full' ? 'کامل: دستمزد، سربار و قیمت عمده هم در حساب می‌آید.' : 'ساده: فقط مواد و بسته‌بندی. برای شروع همین کافی است.') + '</p></div>';
+    h += '<div class="sec">' +
+      f('targetFC', 'هدف هزینه (% قیمت فروش)', 'معمولاً بین 28 تا 35 برای غذا؛ برای کارهای دستی کمتر هم می‌شود') +
+      (s.mode === 'full' ? f('wage', 'دستمزد هر ساعت (تومان)', 'برای حساب زمان کار') + f('overheadPct', 'سربار (% هزینهٔ مواد و دستمزد)', 'گاز، برق، اجاره...') : '') +
+      f('minPortion', 'حداقل مقدار مجاز (% مقدار فعلی)', 'مثلاً 85 یعنی تا 15% کم‌کردن مجاز است') +
+      f('roundTo', 'رند کردن قیمت به (تومان)', 'مثلاً 1000 یا 5000') +
+      f('elasticity', 'حساسیت مشتری به گرانی', '1.2 یعنی 10% گرانی ≈ 12% کاهش فروش') +
+      f('qualityDrop', 'افت فروش بر اثر کم‌کردن مواد (%)', 'اگر کیفیت کمی پایین بیاید') +
+      f('remindDays', 'یادآوری به‌روزرسانی قیمت (هر چند روز)', '0 یعنی بدون یادآوری') + '</div>';
+    var nOv = state.items.filter(function (i) { return L.num(i.tgt) > 0; }).length;
+    h += '<div class="sec stack"><h3>همه یکی</h3><p class="mute" style="margin:0">اگر برای بعضی مورد‌ها هدف جداگانه گذاشته‌اید (' + nOv + ' مورد)، با این دکمه همه از هدف بالا استفاده می‌کنند.</p><button class="btn block" data-act="apply-target"' + (nOv ? '' : ' disabled') + '>هدف بالا برای همه</button></div>';
+    h += '<div class="sec stack"><h3>بخش‌های اضافه</h3>' + [['loss', 'ضایعات مواد'], ['batch', 'یک دستور چند عدد می‌شود'], ['sizes', 'اندازه‌ها (کوچک و بزرگ)'], ['weight', 'فروش وزنی (کیلویی)']].map(function (a) { return '<label class="switch"><input type="checkbox" data-f="st-sw" data-k="' + a[0] + '"' + (s.sw[a[0]] ? ' checked' : '') + '> ' + a[1] + '</label>'; }).join('') + '</div>';
+    h += '<div class="sec stack"><h3>نوع کسب‌وکار</h3><p style="margin:0"><b>' + esc(t ? (t.id === 'other' && state.profile.customName ? state.profile.customName : t.n) : 'انتخاب نشده') + '</b></p><button class="btn block" data-act="go-setup">تغییر نوع و افزودن مواد آماده</button></div>';
+    h += '<div class="sec stack"><h3>اطلاعات</h3>' +
       '<button class="btn block" data-act="export">دریافت پشتیبان (فایل)</button>' +
       '<label class="btn block">بازیابی از فایل<input type="file" accept=".json" data-f="import" hidden></label>' +
+      '<div class="grid2"><button class="btn" data-act="csv-items">Excel ' + esc(W().many) + '</button><button class="btn" data-act="csv-ings">Excel مواد</button></div>' +
       '<button class="btn block" data-act="demo">نمونهٔ پیتزا و ساندویچ</button>' +
       '<button class="btn block danger" data-act="reset">پاک‌کردن همه</button>' +
-      '<p class="mute sm">اگر وارد حساب نشده‌اید، اطلاعات فقط روی همین دستگاه می‌ماند؛ گاهی پشتیبان بگیرید.</p></div>' +
-      '<div class="sec"><h3>آمار استفاده</h3><p class="mute" style="margin:0">فقط روی همین دستگاه. زمان راه‌اندازی: ' + (state.meta.setupSeconds == null ? '—' : Math.round(state.meta.setupSeconds) + ' ثانیه') + '، دفعات شروع سریع: ' + state.meta.setups + '، دفعات ثبت قیمت جدید: ' + state.meta.priceUpdates + '</p></div>';
+      '<p class="mute sm">اگر وارد حساب نشده‌اید، اطلاعات فقط روی همین دستگاه می‌ماند؛ گاهی پشتیبان بگیرید.</p></div>';
+    h += '<div class="sec"><h3>آمار استفاده</h3><p class="mute" style="margin:0">فقط روی همین دستگاه. زمان راه‌اندازی: ' + (state.meta.setupSeconds == null ? '—' : Math.round(state.meta.setupSeconds) + ' ثانیه') + '، دفعات راه‌اندازی: ' + state.meta.setups + '، دفعات ثبت قیمت جدید: ' + state.meta.priceUpdates + '</p></div>';
+    return h;
   }
 
-  // ---------- account + cloud ----------
-  var cloud = { kind: '', msg: '', conflict: false, busy: false, timer: null, checked: null, remote: null };
-  var S = window.Sync;
+  // ======================================================= help
+  function viewHelp() {
+    var steps = [
+      ['1. نوع کسب‌وکار', 'از منو «نوع کسب‌وکار و راه‌اندازی» را بزنید و نزدیک‌ترین مورد را انتخاب کنید. فهرست مواد آماده می‌شود.'],
+      ['2. قیمت مواد', 'در «مواد اولیه» آخرین قیمت خرید را بنویسید. اگر کیسه یا حلب می‌خرید، «روش خرید» را عوض کنید و قیمت یک بسته را بنویسید.'],
+      ['3. بسته‌بندی', 'جعبه، لیوان یا کیسه را در «بسته‌بندی» وارد کنید.'],
+      ['4. ساخت محصول', 'دکمهٔ + را بزنید و محصول را بسازید: مواد و مقدار هر کدام را بنویسید. قیمت پیشنهادی بالای صفحه می‌آید.'],
+      ['5. قیمت سریع', 'وقتی مشتری جلوی شماست، «قیمت سریع» را بزنید؛ چیزی ذخیره نمی‌شود.'],
+      ['6. قیمت عوض شد', 'از منو «ثبت قیمت جدید مواد» را بزنید. برنامه نشان می‌دهد کدام محصول‌ها گران‌تر شد.'],
+      ['7. کارت قیمت', 'از منو «کارت و فهرست قیمت» برای ساخت تصویر آمادهٔ اینستاگرام و بله.']
+    ];
+    return lead('راهنما', 'کوتاه و قدم‌به‌قدم') + '<div class="sec">' + steps.map(function (a) { return '<p style="margin:0 0 12px"><b>' + a[0] + '</b><br><span class="mute">' + a[1] + '</span></p>'; }).join('') + '</div>' +
+      '<div class="sec"><h3>حالت ساده و کامل</h3><p class="mute" style="margin:0">در حالت ساده فقط مواد و بسته‌بندی حساب می‌شود. در حالت کامل (از تنظیمات) دستمزد، سربار و قیمت عمده هم اضافه می‌شود.</p></div>' +
+      '<div class="sec"><h3>آفلاین</h3><p class="mute" style="margin:0">برنامه بدون اینترنت هم کار می‌کند. اگر وارد حساب شده باشید، تغییرات با برگشتن اینترنت خودکار در ابر ذخیره می‌شود.</p></div>';
+  }
+
+  // ======================================================= account + cloud (per-item merge, no more "choose one")
+  var cloud = { kind: '', msg: '', busy: false, timer: null, checked: null };
   function when(ts) { try { return new Date(ts).toLocaleString('fa-IR'); } catch (e) { return ts; } }
   function setCloud(kind, msg) { cloud.kind = kind; cloud.msg = msg; paintStat(); if (tab === 'acc') render(); }
   function paintStat() {
     var el = document.getElementById('syncstat'); if (!el) return;
     var who = document.getElementById('who'); if (who) who.textContent = (S && S.user()) ? (S.user().email || '') : 'بدون حساب';
     if (!S || !S.user()) { el.textContent = ''; el.className = 'sync'; return; }
-    var t = cloud.conflict ? '⚠ تداخل داده' : cloud.busy ? '… همگام‌سازی' : cloud.kind === 'err' ? '⚠ بدون اتصال' : (S.meta().dirty ? '● ذخیره‌نشده در ابر' : '✓ ذخیره در ابر');
-    el.textContent = t; el.className = 'sync' + (cloud.conflict || cloud.kind === 'err' ? ' bad' : '');
+    var offline = cloud.kind === 'err';
+    var t = cloud.busy ? '… همگام‌سازی' : offline ? '⚠ بدون اتصال' : (S.meta().dirty ? '● روی گوشی ذخیره شد' : '✓ ذخیره در ابر');
+    el.textContent = t; el.className = 'sync' + (offline ? ' bad' : '');
   }
   function profile() { var m = S.meta(); return { city: m.city || '', share: !!m.share }; }
-  function scheduleSync() { clearTimeout(cloud.timer); paintStat(); cloud.timer = setTimeout(function () { syncNow(false); }, 1500); }
-  function syncNow(force) {
+  function scheduleSync() { clearTimeout(cloud.timer); paintStat(); cloud.timer = setTimeout(function () { syncNow(0); }, 1500); }
+  // push; when another device saved in between, merge item by item and try again
+  function syncNow(tries, force) {
     if (!S || !S.user() || cloud.busy) return Promise.resolve();
-    if (cloud.conflict && !force) return Promise.resolve();
     cloud.busy = true; paintStat();
     return S.push(state, profile(), force).then(function (r) {
-      cloud.busy = false;
-      if (r.conflict) { cloud.conflict = true; setCloud('err', 'داده‌ای از دستگاه دیگر در ابر هست که با این دستگاه فرق دارد. یکی را انتخاب کنید.'); }
-      else { cloud.conflict = false; setCloud('ok', 'آخرین ذخیره در ابر: ' + when(Date.now())); }
+      if (r.conflict) {
+        if ((tries || 0) >= 3) { cloud.busy = false; setCloud('err', 'همگام‌سازی کامل نشد؛ بعداً دوباره تلاش می‌شود.'); return; }
+        return S.pull().then(function (row) {
+          if (row) { state = L.mergeStates(state, row.state || {}); saveLocal(); var m = S.meta(); m.lastSynced = row.updated_at; S.saveMeta(); }
+          cloud.busy = false; render(); return syncNow((tries || 0) + 1);
+        });
+      }
+      cloud.busy = false; setCloud('ok', 'آخرین ذخیره در ابر: ' + when(Date.now()));
     }).catch(function (e) {
       cloud.busy = false;
-      if (e && e.auth) { setCloud('err', 'نشست شما تمام شده؛ دوباره وارد شوید.'); }
+      if (e && e.auth) setCloud('err', 'نشست شما تمام شده؛ دوباره وارد شوید.');
       else setCloud('err', 'اتصال برقرار نشد؛ تغییرات روی دستگاه ذخیره است و بعداً ارسال می‌شود. ' + ((e && e.text) || ''));
     });
   }
-  function isEmpty(st) { return !st.ingredients.length && !st.items.length; }
-  // after login or on start: reconcile this device with the cloud
+  // after login or on start: merge this device with the cloud, item by item
   function reconcile(justLoggedIn) {
     if (!S || !S.user()) return Promise.resolve();
     cloud.busy = true; paintStat();
     return S.pull().then(function (row) {
       cloud.busy = false;
       var m = S.meta();
-      if (row) { m.city = row.city || ''; m.share = !!row.share_prices; }
-      if (!row) { S.meta().lastSynced = null; return syncNow(false); }                // nothing in cloud yet: upload this device
-      if (!justLoggedIn && m.lastSynced === row.updated_at) { return m.dirty ? syncNow(false) : (setCloud('ok', 'همه‌چیز همگام است.')); }
-      var remote = merge(row.state || {});
-      if (justLoggedIn && !isEmpty(state) && !isEmpty(remote)) {
-        if (confirm('هم روی این دستگاه و هم در ابر اطلاعات دارید.\nتأیید = اطلاعات ابر بارگذاری شود (اطلاعات این دستگاه کنار گذاشته می‌شود)\nانصراف = اطلاعات این دستگاه جای ابر را بگیرد')) { adopt(remote, row.updated_at); }
-        else { m.lastSynced = row.updated_at; return syncNow(true); }
-      } else if (m.dirty && !justLoggedIn && m.lastSynced !== row.updated_at) {
-        cloud.conflict = true; setCloud('err', 'داده‌ای از دستگاه دیگر در ابر هست که با این دستگاه فرق دارد. یکی را انتخاب کنید.'); cloud.remote = { st: remote, at: row.updated_at };
-      } else if (isEmpty(remote) && !isEmpty(state)) { m.lastSynced = row.updated_at; return syncNow(true); }
-      else adopt(remote, row.updated_at);
+      if (!row) { m.lastSynced = null; return syncNow(0); }
+      m.city = row.city || ''; m.share = !!row.share_prices;
+      if (!justLoggedIn && m.lastSynced === row.updated_at) { return m.dirty ? syncNow(0) : setCloud('ok', 'همه‌چیز همگام است.'); }
+      var remote = L.normalize(row.state || {}), merged = L.mergeStates(state, remote);
+      state = merged; saveLocal(); m.lastSynced = row.updated_at;
+      if (!state.profile.done && (state.items.length || state.ingredients.length)) state.profile.done = true;
+      var needPush = !L.sameData(merged, remote);
+      m.dirty = needPush; S.saveMeta();
+      if (justLoggedIn || needPush) { if (tab === 'setup' && state.profile.done) tab = 'prods'; render(); }
+      if (needPush) return syncNow(0);
+      setCloud('ok', justLoggedIn ? 'اطلاعات ابر بارگذاری شد.' : 'همه‌چیز همگام است.');
     }).catch(function (e) {
       cloud.busy = false; setCloud('err', (e && e.auth) ? 'دوباره وارد شوید.' : 'اتصال برقرار نشد: ' + ((e && e.text) || ''));
     });
   }
   function adopt(st, at) {
-    state = st; saveLocal(); var m = S.meta(); m.lastSynced = at; m.dirty = false; S.saveMeta(); cloud.conflict = false;
-    tab = state.items.length ? 'res' : 'qs'; setCloud('ok', 'اطلاعات از ابر بارگذاری شد.'); render();
+    state = L.normalize(st); saveLocal(); var m = S.meta(); m.lastSynced = at; m.dirty = false; S.saveMeta();
+    tab = state.profile.done ? 'prods' : 'setup'; setCloud('ok', 'اطلاعات از ابر بارگذاری شد.'); render();
   }
   function viewAcc() {
     var h = '';
@@ -341,20 +692,21 @@
     if (!u) {
       h += lead('اطلاعاتتان گم نشود', 'بدون حساب هم می‌توانید کار کنید، اما اطلاعات فقط روی همین گوشی می‌ماند. با حساب، اطلاعات در ابر ذخیره می‌شود و با عوض‌کردن گوشی از بین نمی‌رود.');
       h += '<div class="sec stack"><div><label class="lbl" for="acc-email">ایمیل</label><input id="acc-email" type="email" dir="ltr" autocomplete="username" placeholder="name@example.com"></div>' +
-        '<div><label class="lbl" for="acc-pass">رمز عبور (حداقل ۸ کاراکتر)</label><input id="acc-pass" type="password" dir="ltr" autocomplete="current-password"></div>' +
+        '<div><label class="lbl" for="acc-pass">رمز عبور (حداقل 8 کاراکتر)</label><input id="acc-pass" type="password" dir="ltr" autocomplete="current-password"></div>' +
         '<div class="grid2"><button class="btn pri" data-act="acc-in">ورود</button><button class="btn" data-act="acc-up">ثبت‌نام</button></div>' +
         (cloud.msg ? '<div class="note">' + esc(cloud.msg) + '</div>' : '') + '</div>';
     } else {
       var m = S.meta();
       h += lead('حساب شما', '') + '<div class="sec stack"><p dir="ltr" style="margin:0;text-align:right;font-weight:700">' + esc(u.email || '') + '</p>' +
-        '<p style="margin:0">' + (cloud.conflict ? '<span class="pill bad">تداخل داده</span>' : cloud.busy ? 'در حال همگام‌سازی…' : m.dirty ? 'تغییرات هنوز در ابر ذخیره نشده‌اند.' : '<span class="pill ok">همگام با ابر</span>') + '</p>' +
+        '<p style="margin:0">' + (cloud.busy ? 'در حال همگام‌سازی…' : m.dirty ? 'تغییرات هنوز در ابر ذخیره نشده‌اند.' : '<span class="pill ok">همگام با ابر</span>') + '</p>' +
         (cloud.msg ? '<p class="mute" style="margin:0">' + esc(cloud.msg) + '</p>' : '') +
-        (cloud.conflict ? '<div class="grid2"><button class="btn" data-act="acc-usecloud">استفاده از نسخهٔ ابر</button><button class="btn danger" data-act="acc-usethis">جایگزین‌کردن ابر با این دستگاه</button></div>' : '') +
+        '<p class="mute sm" style="margin:0">اگر روی دو گوشی کار کنید، تغییرات هر مورد جدا ترکیب می‌شود و آخرین تغییر همان مورد می‌ماند.</p>' +
         '<div class="grid2"><button class="btn" data-act="acc-sync">همگام‌سازی الان</button><button class="btn" data-act="acc-out">خروج</button></div></div>' +
         '<div class="sec stack"><h3>مشخصات کسب‌وکار</h3>' +
         '<div><label class="lbl" for="acc-city">شهر</label><input id="acc-city" value="' + esc(m.city || '') + '" placeholder="مثلاً مشهد"></div>' +
         '<label class="switch" style="align-items:flex-start"><input type="checkbox" id="acc-share"' + (m.share ? ' checked' : '') + '> <span>اجازه می‌دهم در آینده قیمت مواد من ناشناس برای مقایسهٔ قیمت بین مغازه‌ها استفاده شود. در این نسخه هنوز هیچ دادهٔ شما با کسی به اشتراک گذاشته نمی‌شود.</span></label>' +
         '<button class="btn" data-act="acc-prof">ذخیرهٔ مشخصات</button></div>' +
+        '<div class="sec"><details><summary>اگر همگام‌سازی درست کار نکرد</summary><div class="stack"><button class="btn block" data-act="acc-usecloud">فقط نسخهٔ ابر را بگیر (اطلاعات این گوشی کنار گذاشته می‌شود)</button><button class="btn block danger" data-act="acc-usethis">اطلاعات ابر را با این گوشی عوض کن</button></div></details></div>' +
         '<div class="sec stack"><h3>حذف اطلاعات ابری</h3><p class="mute" style="margin:0">اطلاعات شما در ابر پاک می‌شود؛ نسخهٔ روی این گوشی می‌ماند. برای حذف کامل خود حساب، به ما پیام دهید.</p><button class="btn danger" data-act="acc-del">حذف اطلاعات من از ابر</button></div>';
     }
     h += '<div class="sec stack"><h3>بررسی اتصال به سرور</h3><button class="btn" data-act="acc-check">بررسی اتصال</button><p class="mute" id="chk" style="margin:0">' + (cloud.checked || '') + '</p></div>';
@@ -365,44 +717,111 @@
     if (act === 'acc-in' || act === 'acc-up') {
       var em = v('acc-email'), pw = (document.getElementById('acc-pass') || {}).value || '';
       if (!/^\S+@\S+\.\S+$/.test(em)) { setCloud('err', 'ایمیل را درست وارد کنید.'); return; }
-      if (pw.length < 8) { setCloud('err', 'رمز عبور حداقل ۸ کاراکتر باشد.'); return; }
+      if (pw.length < 8) { setCloud('err', 'رمز عبور حداقل 8 کاراکتر باشد.'); return; }
       setCloud('', 'در حال ارتباط با سرور…');
       (act === 'acc-in' ? S.signIn(em, pw).then(function () { return true; }) : S.signUp(em, pw).then(function (r) { if (r.needConfirm) { setCloud('', 'ایمیل تأیید برای شما ارسال شد؛ لینک آن را باز کنید و بعد وارد شوید.'); return false; } return true; }))
-        .then(function (ok) { if (!ok) return; cloud.msg = ''; cloud.conflict = false; paintStat(); render(); return reconcile(true); })
+        .then(function (ok) { if (!ok) return; cloud.msg = ''; paintStat(); render(); return reconcile(true); })
         .catch(function (e) { setCloud('err', (e && e.text) || 'اتصال به سرور برقرار نشد. اینترنت را بررسی کنید.'); });
     } else if (act === 'acc-out') {
       if (S.meta().dirty && !confirm('تغییرات اخیر هنوز در ابر ذخیره نشده‌اند. با خروج، اطلاعات این دستگاه پاک می‌شود و آن تغییرات از دست می‌روند. ادامه؟')) return;
       if (!confirm('با خروج، اطلاعات از روی این گوشی پاک می‌شود (در ابر می‌ماند). خروج؟')) return;
-      S.signOut(); state = JSON.parse(JSON.stringify(DEFAULT)); saveLocal(); cloud = { kind: '', msg: '', conflict: false, busy: false, timer: null, checked: cloud.checked, remote: null }; tab = 'qs'; paintStat(); render();
-    } else if (act === 'acc-sync') { cloud.conflict = cloud.conflict; reconcile(false); }
-    else if (act === 'acc-usecloud') { S.pull().then(function (row) { if (row) adopt(merge(row.state || {}), row.updated_at); }).catch(function (e) { setCloud('err', (e && e.text) || 'اتصال برقرار نشد'); }); }
-    else if (act === 'acc-usethis') { if (confirm('اطلاعات ابر با اطلاعات این دستگاه جایگزین شود؟')) syncNow(true); }
-    else if (act === 'acc-prof') { var m = S.meta(); m.city = v('acc-city'); m.share = !!(document.getElementById('acc-share') || {}).checked; S.saveMeta(); S.markDirty(); syncNow(false); }
+      S.signOut(); state = L.blank(); saveLocal(); wz = null; cloud = { kind: '', msg: '', busy: false, timer: null, checked: cloud.checked }; tab = 'setup'; paintStat(); render();
+    } else if (act === 'acc-sync') { reconcile(false); }
+    else if (act === 'acc-usecloud') { S.pull().then(function (row) { if (row) adopt(row.state || {}, row.updated_at); }).catch(function (e) { setCloud('err', (e && e.text) || 'اتصال برقرار نشد'); }); }
+    else if (act === 'acc-usethis') { if (confirm('اطلاعات ابر با اطلاعات این دستگاه جایگزین شود؟')) syncNow(0, true); }
+    else if (act === 'acc-prof') { var m = S.meta(); m.city = v('acc-city'); m.share = !!(document.getElementById('acc-share') || {}).checked; S.saveMeta(); S.markDirty(); syncNow(0); }
     else if (act === 'acc-del') { if (!confirm('اطلاعات شما از ابر حذف شود؟')) return; S.deleteCloud().then(function () { setCloud('ok', 'اطلاعات ابری حذف شد.'); }).catch(function (e) { setCloud('err', (e && e.text) || 'اتصال برقرار نشد'); }); }
     else if (act === 'acc-check') {
       cloud.checked = 'در حال بررسی…'; render();
-      S.check().then(function (r) { cloud.checked = r.emailOff ? '⚠ سرور در دسترس است اما ورود با ایمیل در Supabase خاموش است. در Supabase: Authentication ← Sign In / Providers ← Email را روشن کنید و Save بزنید.' : '✓ سرور در دسترس است. ' + (r.signupDisabled ? 'ثبت‌نام بسته است. ' : '') + (r.emailOff ? '' : r.autoconfirm ? 'ثبت‌نام بدون تأیید ایمیل فعال است.' : 'ثبت‌نام نیاز به تأیید ایمیل دارد؛ در Supabase گزینهٔ Confirm email را خاموش و Save کنید.'); render(); })
+      S.check().then(function (r) { cloud.checked = r.emailOff ? '⚠ سرور در دسترس است اما ورود با ایمیل در Supabase خاموش است. در Supabase: Authentication ← Sign In / Providers ← Email را روشن کنید و Save بزنید.' : '✓ سرور در دسترس است. ' + (r.signupDisabled ? 'ثبت‌نام بسته است. ' : '') + (r.autoconfirm ? 'ثبت‌نام بدون تأیید ایمیل فعال است.' : 'ثبت‌نام نیاز به تأیید ایمیل دارد؛ در Supabase گزینهٔ Confirm email را خاموش و Save کنید.'); render(); })
         .catch(function (e) { cloud.checked = '✗ ' + ((e && e.text) || 'سرور در دسترس نیست (فیلترشکن لازم است یا اینترنت قطع است).'); render(); });
     }
   }
 
-  var VIEWS = { acc: viewAcc, qs: viewQs, chg: viewChg, ing: viewIng, menu: viewMenu, sub: viewSub, res: viewRes, set: viewSet };
+  // ======================================================= render
+  var VIEWS = { prods: viewProds, prod: viewProd, ings: viewIngs, packs: viewPacks, quick: viewQuick, setup: viewSetup, chg: viewChg, res: viewRes, cards: viewCards, sub: viewSub, set: viewSet, acc: viewAcc, help: viewHelp };
   var rendering = false;
   function render() {
-    if (rendering) { setTimeout(render, 0); return; }   // a blur fired by replacing the page must not start a second render
+    if (rendering) { setTimeout(render, 0); return; }
     rendering = true;
     var v = document.getElementById('view');
     try { var ae = document.activeElement; if (ae && v.contains(ae) && ae.blur) ae.blur(); } catch (e) {}
     try { v.innerHTML = VIEWS[tab](); } finally { rendering = false; }
+    var nm = (tab === 'prod') ? 'prods' : tab;
     Array.prototype.forEach.call(document.querySelectorAll('#tabs button'), function (b) { var on = b.getAttribute('data-tab') === tab; b.classList.toggle('on', on); if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
-    var ti = document.getElementById('title'); if (ti) ti.textContent = TITLES[tab] || 'قیمت‌گذار منو';
-    var fb = document.getElementById('fab'); if (fb) fb.classList.toggle('show', tab === 'res' && state.items.length > 0);
+    Array.prototype.forEach.call(document.querySelectorAll('#nav [data-nav]'), function (b) { b.classList.toggle('on', b.getAttribute('data-nav') === nm); });
+    var ti = document.getElementById('title'); if (ti) ti.textContent = titleOf();
+    var np = document.querySelector('#nav-prods span'); if (np) np.textContent = W().many;
+    document.body.classList.toggle('nonav', tab === 'setup' && !state.profile.done);
+    Array.prototype.forEach.call(document.querySelectorAll('.appname'), function (e) { e.textContent = NAME; });
+    if (focusSel) { var el = document.querySelector(focusSel); focusSel = null; if (el) { try { el.focus(); el.scrollIntoView({ block: 'center' }); } catch (e) {} } }
+  }
+  function go(t, id) { tab = t; if (id) cur = id; render(); window.scrollTo(0, 0); }
+
+  // ---------- sheets ----------
+  function openSheet(html) { var w = document.getElementById('sheetwrap'); w.innerHTML = html; w.hidden = false; }
+  function closeSheet() { var w = document.getElementById('sheetwrap'); w.hidden = true; w.innerHTML = ''; urls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} }); urls = []; window._cardBlobs = null; }
+  function plusSheet() {
+    var w = W();
+    openSheet('<div class="sheet" role="dialog" aria-label="افزودن"><h3>چه چیزی اضافه کنیم؟</h3>' +
+      '<button class="opt-btn" data-sheet="new-item">' + ICON('menuitem') + '<span>' + w.one + ' جدید<small>مواد و قیمت پیشنهادی</small></span></button>' +
+      '<button class="opt-btn" data-sheet="new-ing">' + ICON('ing') + '<span>ماده جدید<small>قیمت خرید</small></span></button>' +
+      '<button class="opt-btn" data-sheet="new-pack">' + ICON('box') + '<span>بسته‌بندی جدید<small>جعبه، لیوان، کیسه</small></span></button>' +
+      '<button class="opt-btn" data-sheet="new-price">' + ICON('chg') + '<span>ثبت قیمت‌های جدید مواد<small>قیمت‌ها عوض شده</small></span></button>' +
+      '<button class="btn block" data-sheet="close" style="margin-top:12px">بستن</button></div>');
   }
 
-  // ---------- events ----------
-  function closest(el, sel) { while (el && el.nodeType === 1) { if (el.matches(sel)) return el; el = el.parentNode; } return null; }
-  function find(arr, id) { return arr.filter(function (x) { return x.id === id; })[0]; }
+  // ======================================================= actions
+  function newItem() {
+    var it = { id: uid(), name: '', price: 0, sales: 0, yield: 1, mode: 'piece', lines: [], pk: [], u: now() };
+    state.items.push(it); cur = it.id; tab = 'prod'; focusSel = '[data-f="it-name"]';
+  }
+  function newIng() { state.ingredients.push({ id: uid(), name: '', unit: 'kg', price: 0, trimmable: true, u: now() }); tab = 'ings'; q.ing = ''; focusSel = '#list .item:last-child [data-f="ing-name"]'; }
+  function newPack() { state.packs.push({ id: uid(), name: '', price: 0, u: now() }); tab = 'packs'; q.pk = ''; focusSel = '#list .item:last-child [data-f="pk-name"]'; }
 
+  function delIng(id) {
+    gone(id); state.ingredients = state.ingredients.filter(function (x) { return x.id !== id; });
+    state.items.forEach(function (it) { var n = it.lines.length; it.lines = it.lines.filter(function (l) { return l.ingId !== id; }); if (it.lines.length !== n) touch(it); });
+    state.subs = state.subs.filter(function (s) { if (s.fromId === id || s.toId === id) { gone(s.id); return false; } return true; });
+  }
+  function delPack(id) {
+    gone(id); state.packs = state.packs.filter(function (x) { return x.id !== id; });
+    state.items.forEach(function (it) { var n = it.pk.length; it.pk = it.pk.filter(function (l) { return l.packId !== id; }); if (it.pk.length !== n) touch(it); });
+  }
+
+  function demo() {
+    var ts = now(), I = function (id, name, unit, price, prev, trim) { return { id: id, name: name, unit: unit, price: price, prevPrice: prev, trimmable: trim !== false, u: ts }; };
+    state = L.normalize({
+      v: 2, profile: { type: 'fast', done: true },
+      ingredients: [I('mozz', 'پنیر پیتزا (موزارلا)', 'kg', 650000, 500000), I('proc', 'پنیر پروسسی', 'kg', 380000, 340000), I('dough', 'خمیر', 'kg', 60000, 55000), I('sauce', 'سس گوجه', 'kg', 120000, 110000),
+        I('chick', 'سینه مرغ', 'kg', 480000, 380000, false), I('bread', 'نان ساندویچی', 'piece', 12000, 10000), I('oil', 'روغن سرخ‌کردنی', 'l', 250000, 69600)],
+      packs: [{ id: 'bx', name: 'جعبهٔ پیتزا', price: 25000, u: ts }],
+      items: [{ id: 'pz', name: 'پیتزا مخصوص', price: 450000, sales: 300, u: ts, lines: [{ ingId: 'mozz', amount: 140 }, { ingId: 'dough', amount: 250 }, { ingId: 'sauce', amount: 60 }, { ingId: 'chick', amount: 60 }], pk: [{ packId: 'bx', qty: 1 }] },
+        { id: 'sw', name: 'ساندویچ مرغ', price: 260000, sales: 500, u: ts, lines: [{ ingId: 'bread', amount: 1 }, { ingId: 'chick', amount: 110 }, { ingId: 'sauce', amount: 25 }, { ingId: 'oil', amount: 30 }] }],
+      subs: [{ id: 's1', fromId: 'mozz', toId: 'proc', ratio: 1, maxShare: 40, u: ts }],
+      settings: { targetFC: 30, minPortion: 85, roundTo: 5000, elasticity: 1.2, qualityDrop: 3, sw: { loss: true, sizes: true } }, su: ts,
+      meta: { lastPriceUpdate: ts }
+    });
+  }
+  function doExport() { CARD.saveText(JSON.stringify(state, null, 1), 'repricer-backup.json', 'application/json'); }
+  function doImport(file) {
+    if (!file) return; var r = new FileReader();
+    r.onload = function () { try { state = L.normalize(JSON.parse(r.result)); state.profile.done = state.profile.done || !!(state.items.length || state.ingredients.length); save(); render(); } catch (e) { alert('فایل معتبر نیست'); } };
+    r.readAsText(file);
+  }
+  function csvItems() {
+    var c = C(), rows = state.items.map(function (it) {
+      var cost = L.unitCost(it, c), P = L.num(it.price);
+      return [it.name, it.mode === 'kg' ? 'وزنی' : 'عددی', Math.round(P), Math.round(L.num(it.wholesale)), Math.round(cost), P > 0 ? Math.round(cost / P * 1000) / 10 : '', Math.round(L.suggest(it, c, cost)), L.num(it.sales) || ''];
+    });
+    CARD.saveText(CARD.csv(['نام', 'روش فروش', 'قیمت فروش', 'قیمت عمده', 'هزینه', 'سهم هزینه %', 'قیمت پیشنهادی', 'فروش ماهانه'], rows), 'products.csv');
+  }
+  function csvIngs() {
+    var rows = state.ingredients.map(function (g) { var rs = L.rise(g); return [g.name, UNAME[g.unit], Math.round(g.price), g.loss || '', rs ? Math.round(rs.pct * 10) / 10 : '']; });
+    CARD.saveText(CARD.csv(['نام', 'قیمت بر اساس', 'قیمت', 'ضایعات %', 'تغییر اخیر %'], rows), 'ingredients.csv');
+  }
+
+  // ======================================================= events
   function drawer(open) {
     document.body.classList.toggle('open', open);
     var mb = document.getElementById('menuBtn'); mb.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -411,107 +830,188 @@
   }
   document.getElementById('menuBtn').addEventListener('click', function () { drawer(!document.body.classList.contains('open')); });
   document.getElementById('scrim').addEventListener('click', function () { drawer(false); });
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && document.body.classList.contains('open')) drawer(false); });
-  document.getElementById('fab').addEventListener('click', function () { tab = 'chg'; render(); window.scrollTo(0, 0); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { if (!document.getElementById('sheetwrap').hidden) closeSheet(); else if (document.body.classList.contains('open')) drawer(false); } });
   document.getElementById('tabs').addEventListener('click', function (e) {
-    var b = closest(e.target, 'button'); if (!b) return; tab = b.getAttribute('data-tab'); render(); document.body.classList.remove('open'); document.getElementById('menuBtn').setAttribute('aria-expanded', 'false'); window.scrollTo(0, 0);
+    var b = closest(e.target, 'button'); if (!b) return; var t = b.getAttribute('data-tab');
+    if (t === 'setup') wzStart();
+    tab = t; render(); document.body.classList.remove('open'); document.getElementById('menuBtn').setAttribute('aria-expanded', 'false'); window.scrollTo(0, 0);
   });
-  // show the formatted amount under price fields while typing
-  document.getElementById('view').addEventListener('input', function (e) {
-    var t = e.target; if (t.type !== 'number' || !t.parentNode) return;
+  document.getElementById('nav').addEventListener('click', function (e) {
+    var b = closest(e.target, 'button'); if (!b) return;
+    if (b.id === 'plus') { plusSheet(); return; }
+    go(b.getAttribute('data-nav'));
+  });
+  document.getElementById('sheetwrap').addEventListener('click', function (e) {
+    if (e.target.id === 'sheetwrap') { closeSheet(); return; }
+    var b = closest(e.target, '[data-sheet]'); if (!b) return; var a = b.getAttribute('data-sheet');
+    if (a === 'close') closeSheet();
+    else if (a === 'new-item') { closeSheet(); newItem(); save(); render(); window.scrollTo(0, 0); }
+    else if (a === 'new-ing') { closeSheet(); newIng(); save(); render(); }
+    else if (a === 'new-pack') { closeSheet(); newPack(); save(); render(); }
+    else if (a === 'new-price') { closeSheet(); go('chg'); }
+    else if (a === 'card-send') { var bl = window._cardBlobs; if (bl) CARD.send(bl, 'price-card'); }
+  });
+
+  var view = document.getElementById('view');
+  // show the formatted amount under price fields while typing; live search; scale slider
+  view.addEventListener('input', function (e) {
+    var t = e.target, f = t.getAttribute && t.getAttribute('data-f');
+    if (f === 'q-ing') { q.ing = t.value; document.getElementById('list').innerHTML = ingList(); return; }
+    if (f === 'q-pk') { q.pk = t.value; document.getElementById('list').innerHTML = packList(); return; }
+    if (f === 'q-prod') { q.prod = t.value; document.getElementById('list').innerHTML = prodCards(); return; }
+    if (f === 'scale') { scaleK = Number(t.value) || 1; var it = find(state.items, cur), bx = document.getElementById('scalebox'); if (it && bx) bx.innerHTML = scaleHTML(it); return; }
+    if (t.type !== 'number' || !t.parentNode) return;
     var h = t.parentNode.querySelector('.hint'); if (h) h.textContent = Number(t.value) > 0 ? fmt(Number(t.value)) : '';
   });
 
-  document.getElementById('view').addEventListener('change', function (e) {
+  view.addEventListener('change', function (e) {
     var t = e.target, f = t.getAttribute('data-f'); if (!f) return;
     var rowEl = closest(t, '[data-id]'), id = rowEl && rowEl.getAttribute('data-id');
     var lineEl = closest(t, '[data-line]'), li = lineEl ? Number(lineEl.getAttribute('data-line')) : -1;
-    var n = Number(t.value);
-    if (f === 'qs-dish') { qs.dishes[t.getAttribute('data-k')] = t.checked; render(); return; }
-    if (f === 'qs-price') { qs.prices[t.getAttribute('data-k')] = t.value; return; }
-    if (f === 'qs-sell') { qs.sell[t.getAttribute('data-k')] = t.value; return; }
-    if (f === 'up-price') { upd[t.getAttribute('data-k')] = t.value; return; }
-    if (f === 'ing-name') find(state.ingredients, id).name = t.value;
-    else if (f === 'ing-unit') { find(state.ingredients, id).unit = t.value; }
-    else if (f === 'ing-price') { var g = find(state.ingredients, id); if (n !== g.price) { g.prevPrice = g.price; g.price = n; g.history = (g.history || []).concat([{ t: Date.now(), p: n }]); } }
-    else if (f === 'ing-trim') find(state.ingredients, id).trimmable = t.checked;
-    else if (f === 'it-name') find(state.items, id).name = t.value;
-    else if (f === 'it-price') find(state.items, id).price = n;
-    else if (f === 'it-sales') find(state.items, id).sales = n;
-    else if (f === 'ln-ing') find(state.items, id).lines[li].ingId = t.value;
-    else if (f === 'ln-amt') find(state.items, id).lines[li].amount = n;
-    else if (f === 'sb-from') find(state.subs, id).fromId = t.value;
-    else if (f === 'sb-to') find(state.subs, id).toId = t.value;
-    else if (f === 'sb-ratio') find(state.subs, id).ratio = n;
-    else if (f === 'sb-share') find(state.subs, id).maxShare = n;
-    else if (f.indexOf('st-') === 0) state.settings[f.slice(3)] = n;
-    else if (f === 'import') { doImport(t.files[0]); return; }
+    var n = Number(t.value), k = t.getAttribute('data-k');
+    if (f.indexOf('q-') === 0 || f === 'scale') return;
+    // wizard fields (no saving)
+    if (f === 'wz-type') { wzPick(k); render(); return; }
+    if (f === 'wz-cname') { wz.cname = t.value; return; }
+    if (f === 'wz-csw') { wz.csw[k] = t.checked; return; }
+    if (f === 'wz-ing') { wz.ing[k] = t.checked; return; }
+    if (f === 'wz-price') { wz.price[k] = t.value; if (t.value !== '' && !wz.ing[k]) { wz.ing[k] = true; render(); } return; }
+    if (f === 'wz-pk') { wz.pk[k] = t.checked; return; }
+    if (f === 'wz-pkp') { wz.pkp[k] = t.value; if (t.value !== '' && !wz.pk[k]) { wz.pk[k] = true; render(); } return; }
+    if (f === 'wz-dish') { wz.dish[k] = t.checked; render(); return; }
+    if (f === 'wz-sell') { wz.sell[k] = t.value; return; }
+    if (f === 'up-price') { upd[k] = t.value; return; }
+    if (f === 'card-pick') { cardOpt.pick[k] = t.checked; return; }
+    if (f === 'card-whole') { cardOpt.wholesale = t.checked; render(); return; }
+    if (f === 'qc-ing') { qc.lines[li].ingId = t.value; render(); return; }
+    if (f === 'qc-amt') { qc.lines[li].amount = n; render(); return; }
+    if (f === 'qc-n') { qc.n = n; render(); return; }
+    if (f === 'qc-other') { qc.other = n; render(); return; }
+    if (f === 'shop') { state.settings.shopName = t.value; touchSettings(); save(); return; }
+    if (f === 'contact') { state.settings.contact = t.value; touchSettings(); save(); return; }
+    if (f === 'import') { doImport(t.files[0]); return; }
+
+    var g, it, p;
+    if (f === 'ing-name') { g = find(state.ingredients, id); g.name = t.value; touch(g); }
+    else if (f === 'ing-unit') { g = find(state.ingredients, id); g.unit = t.value; g.packQty = null; g.packPrice = null; touch(g); }
+    else if (f === 'ing-buy') {
+      g = find(state.ingredients, id); var v = t.value, list = T.packs[g.unit] || [];
+      if (v === 'base') { g.packQty = null; g.packPrice = null; }
+      else {
+        g.packQty = v === 'custom' ? (L.num(g.packQty) || 1) : list[Number(v.slice(1))][1];
+        if (L.num(g.packPrice) > 0) applyPack(g); else g.packPrice = Math.round(g.price * g.packQty);   // keep today's price, show it as a pack price
+      }
+      touch(g);
+    }
+    else if (f === 'ing-price') { g = find(state.ingredients, id); setPrice(g, n); }
+    else if (f === 'ing-pqty') { g = find(state.ingredients, id); g.packQty = n > 0 ? n : 1; applyPack(g); touch(g); }
+    else if (f === 'ing-ppack') { g = find(state.ingredients, id); g.packPrice = n; applyPack(g); touch(g); }
+    else if (f === 'ing-loss') { g = find(state.ingredients, id); g.loss = Math.min(90, Math.max(0, n)); touch(g); }
+    else if (f === 'ing-trim') { g = find(state.ingredients, id); g.trimmable = t.checked; touch(g); }
+    else if (f === 'pk-name') { p = find(state.packs, id); p.name = t.value; touch(p); }
+    else if (f === 'pk-price') { p = find(state.packs, id); p.price = n; touch(p); }
+    else if (f.indexOf('it-') === 0 || f.indexOf('ln-') === 0 || f.indexOf('pk-') === 0 || f.indexOf('sz-') === 0) {
+      it = find(state.items, cur); if (!it) return;
+      if (f === 'it-name') it.name = t.value;
+      else if (f === 'it-price') it.price = n;
+      else if (f === 'it-sales') it.sales = n;
+      else if (f === 'it-cook') it.cookLoss = Math.min(90, Math.max(0, n));
+      else if (f === 'it-yield') it.yield = Math.max(1, n || 1);
+      else if (f === 'it-min') it.minutes = n;
+      else if (f === 'it-whole') it.wholesale = n;
+      else if (f === 'it-tgt') it.tgt = n > 0 ? n : null;
+      else if (f === 'ln-ing') it.lines[li].ingId = t.value;
+      else if (f === 'ln-amt') it.lines[li].amount = n;
+      else if (f === 'pk-sel') it.pk[li].packId = t.value;
+      else if (f === 'pk-qty') it.pk[li].qty = n;
+      else if (f === 'sz-name') it.sizes[li].name = t.value;
+      else if (f === 'sz-factor') it.sizes[li].factor = n;
+      else if (f === 'sz-price') it.sizes[li].price = n;
+      touch(it);
+    }
+    else if (f === 'sb-from') { p = find(state.subs, id); p.fromId = t.value; touch(p); }
+    else if (f === 'sb-to') { p = find(state.subs, id); p.toId = t.value; touch(p); }
+    else if (f === 'sb-ratio') { p = find(state.subs, id); p.ratio = n; touch(p); }
+    else if (f === 'sb-share') { p = find(state.subs, id); p.maxShare = n; touch(p); }
+    else if (f === 'st-sw') { state.settings.sw[k] = t.checked; touchSettings(); }
+    else if (f.indexOf('st-') === 0) { state.settings[f.slice(3)] = n; touchSettings(); }
     save(); render();
   });
 
-  document.getElementById('view').addEventListener('click', function (e) {
+  view.addEventListener('click', function (e) {
+    var a = closest(e.target, 'a[data-act]'); if (a) e.preventDefault();
     var b = closest(e.target, '[data-act]'); if (!b) return;
-    var act = b.getAttribute('data-act');
+    var act = b.getAttribute('data-act'), k = b.getAttribute('data-k');
     var rowEl = closest(b, '[data-id]'), id = rowEl && rowEl.getAttribute('data-id');
     var lineEl = closest(b, '[data-line]'), li = lineEl ? Number(lineEl.getAttribute('data-line')) : -1;
+    var it = tab === 'prod' ? find(state.items, cur) : null;
     if (act.indexOf('acc-') === 0) { accAct(act); return; }
-    if (act.indexOf('go-') === 0) { tab = act.slice(3); render(); window.scrollTo(0, 0); return; }
-    if (act === 'ing-add') state.ingredients.push({ id: uid(), name: '', unit: 'kg', price: 0, trimmable: true });
-    else if (act === 'ing-del') { if (!confirm('حذف شود؟')) return; state.ingredients = state.ingredients.filter(function (x) { return x.id !== id; }); state.items.forEach(function (it) { it.lines = it.lines.filter(function (l) { return l.ingId !== id; }); }); state.subs = state.subs.filter(function (s) { return s.fromId !== id && s.toId !== id; }); }
-    else if (act === 'it-add') state.items.push({ id: uid(), name: '', price: 0, sales: 0, lines: [] });
-    else if (act === 'it-del') { if (!confirm('حذف شود؟')) return; state.items = state.items.filter(function (x) { return x.id !== id; }); }
-    else if (act === 'ln-add') { var it = find(state.items, id); if (!state.ingredients.length) return; it.lines.push({ ingId: state.ingredients[0].id, amount: 0 }); }
-    else if (act === 'ln-del') find(state.items, id).lines.splice(li, 1);
-    else if (act === 'sb-add') { if (state.ingredients.length < 2) { alert('حداقل دو ماده لازم است'); return; } state.subs.push({ id: uid(), fromId: state.ingredients[0].id, toId: state.ingredients[1].id, ratio: 1, maxShare: 50 }); }
-    else if (act === 'sb-del') state.subs = state.subs.filter(function (x) { return x.id !== id; });
-    else if (act === 'demo') { if (state.items.length && !confirm('داده‌های فعلی با نمونه عوض شود؟')) return; demo(); tab = 'res'; }
-    else if (act === 'reset') { if (!confirm('همهٔ داده‌ها پاک شود؟' + (S && S.user() ? ' (اگر وارد حساب هستید، نسخهٔ ابری هم پاک می‌شود.)' : ''))) return; state = JSON.parse(JSON.stringify(DEFAULT)); }
+    if (act.indexOf('go-') === 0) { if (act === 'go-setup') wzStart(); go(act.slice(3)); return; }
+    if (act === 'open') { go('prod', id); return; }
+    // wizard
+    if (act === 'wz-next') { if (wz.step === 1 && !wz.type) return; wz.step++; render(); window.scrollTo(0, 0); return; }
+    if (act === 'wz-back') { wz.step = Math.max(1, wz.step - 1); render(); window.scrollTo(0, 0); return; }
+    if (act === 'wz-finish') { if (!wzFinish()) return; tab = 'prods'; save(); render(); window.scrollTo(0, 0); return; }
+    // quick price
+    if (act === 'qc-add') { if (state.ingredients.length) qc.lines.push({ ingId: state.ingredients[0].id, amount: 0 }); render(); return; }
+    if (act === 'qc-del') { qc.lines.splice(li, 1); render(); return; }
+    if (act === 'qc-clear') { qc = { lines: [], other: 0, n: 1 }; render(); return; }
+    if (act === 'qc-save') {
+      var tmp = qcTemp(); if (!tmp.it.lines.length) { alert('اول مواد را وارد کنید.'); return; }
+      var ni = { id: uid(), name: '', price: tmp.sug, sales: 0, yield: tmp.it.yield, mode: 'piece', lines: tmp.it.lines.map(function (l) { return { ingId: l.ingId, amount: L.num(l.amount) }; }), pk: [], u: now() };
+      if (L.num(qc.other) > 0) { var pg = { id: uid(), name: 'هزینهٔ دیگر', price: L.num(qc.other) / ni.yield, u: now() }; state.packs.push(pg); ni.pk.push({ packId: pg.id, qty: 1 }); }
+      state.items.push(ni); cur = ni.id; qc = { lines: [], other: 0, n: 1 }; tab = 'prod'; focusSel = '[data-f="it-name"]'; save(); render(); window.scrollTo(0, 0); return;
+    }
+    // cards
+    if (act === 'theme') { cardOpt.theme = k; render(); return; }
+    if (act === 'card-list') { var ids = state.items.filter(function (x) { return cardOpt.pick && cardOpt.pick[x.id]; }).map(function (x) { return x.id; }); makeCard('list', cardRows(ids), cardOpt.wholesale ? 'قیمت عمده' : 'فهرست قیمت'); return; }
+    if (act === 'card-one') { if (it) makeCard('single', cardRows([it.id]), ''); return; }
+
+    if (act === 'new-item') { newItem(); }
+    else if (act === 'ing-add') newIng();
+    else if (act === 'pkg-add') newPack();
+    else if (act === 'ing-del') { if (!confirm('حذف شود؟')) return; delIng(id); }
+    else if (act === 'pkg-del') { if (!confirm('حذف شود؟')) return; delPack(id); }
+    else if (act === 'it-del') { if (!it || !confirm('حذف شود؟')) return; gone(it.id); state.items = state.items.filter(function (x) { return x.id !== it.id; }); tab = 'prods'; }
+    else if (act === 'it-dup') { if (!it) return; var cp = JSON.parse(JSON.stringify(it)); cp.id = uid(); cp.name = (it.name || '') + ' (کپی)'; cp.u = now(); state.items.push(cp); cur = cp.id; focusSel = '[data-f="it-name"]'; }
+    else if (act === 'it-mode-piece') { if (it) { it.mode = 'piece'; touch(it); } }
+    else if (act === 'it-mode-kg') { if (it) { it.mode = 'kg'; touch(it); } }
+    else if (act === 'ln-add') { if (it && state.ingredients.length) { it.lines.push({ ingId: state.ingredients[0].id, amount: 0 }); touch(it); } }
+    else if (act === 'ln-del') { it.lines.splice(li, 1); touch(it); }
+    else if (act === 'pk-add') { if (it && state.packs.length) { it.pk.push({ packId: state.packs[0].id, qty: 1 }); touch(it); } }
+    else if (act === 'pk-del') { it.pk.splice(li, 1); touch(it); }
+    else if (act === 'sz-add') { if (it) { it.sizes = it.sizes || []; it.sizes.push({ id: uid(), name: it.sizes.length ? '' : 'کوچک', factor: 1, price: 0 }); touch(it); } }
+    else if (act === 'sz-del') { it.sizes.splice(li, 1); touch(it); }
+    else if (act === 'sb-add') { if (state.ingredients.length < 2) { alert('حداقل دو ماده لازم است'); return; } state.subs.push({ id: uid(), fromId: state.ingredients[0].id, toId: state.ingredients[1].id, ratio: 1, maxShare: 50, u: now() }); }
+    else if (act === 'sb-del') { gone(id); state.subs = state.subs.filter(function (x) { return x.id !== id; }); }
+    else if (act === 'demo') { if (state.items.length && !confirm('داده‌های فعلی با نمونه عوض شود؟')) return; demo(); tab = 'prods'; }
+    else if (act === 'reset') {
+      if (!confirm('همهٔ داده‌ها پاک شود؟' + (S && S.user() ? ' (اگر وارد حساب هستید، نسخهٔ ابری هم پاک می‌شود.)' : ''))) return;
+      var dd = state.del || {}, t0 = now();
+      [].concat(state.ingredients, state.packs, state.items, state.subs).forEach(function (x) { dd[x.id] = t0; });   // so a merge cannot bring them back
+      state = L.blank(); state.su = t0; state.del = dd; wz = null; tab = 'setup';
+    }
+    else if (act === 'mode-simple') { state.settings.mode = 'simple'; touchSettings(); }
+    else if (act === 'mode-full') { state.settings.mode = 'full'; touchSettings(); }
+    else if (act === 'apply-target') { state.items.forEach(function (x) { if (x.tgt) { x.tgt = null; touch(x); } }); }
     else if (act === 'export') { doExport(); return; }
-    else if (act === 'qs-go') { if (!qsApply()) return; tab = 'res'; }
+    else if (act === 'csv-items') { csvItems(); return; }
+    else if (act === 'csv-ings') { csvIngs(); return; }
     else if (act === 'up-go') {
       var any = false;
-      state.ingredients.forEach(function (g) { var v = upd[g.id]; if (v === '' || v == null) return; var p = Number(v); if (!(p >= 0) || p === g.price) return; g.prevPrice = g.price; g.price = p; g.history = (g.history || []).concat([{ t: Date.now(), p: p }]); any = true; });
+      state.ingredients.forEach(function (g) { var v = upd[g.id]; if (v === '' || v == null) return; var p = Number(v); if (!(p >= 0) || p === g.price) return; if (L.num(g.packQty) > 0) g.packPrice = p * g.packQty; setPrice(g, p); any = true; });
       upd = {}; if (any) state.meta.priceUpdates++; else { alert('قیمت جدیدی وارد نشده است'); return; }
     }
     else if (act === 'share') { save(); render(); var bx = document.getElementById('sharebox'); bx.innerHTML = '<textarea id="sharetxt" rows="8" style="width:100%;margin-top:8px"></textarea><button class="btn" data-act="copy">کپی</button>'; document.getElementById('sharetxt').value = shareText(); return; }
-    else if (act === 'copy') { var ta = document.getElementById('sharetxt'); ta.select(); try { document.execCommand('copy'); } catch (e) {} if (navigator.clipboard) { try { navigator.clipboard.writeText(ta.value); } catch (e) {} } return; }
+    else if (act === 'copy') { var ta = document.getElementById('sharetxt'); ta.select(); try { document.execCommand('copy'); } catch (er) {} if (navigator.clipboard) { try { navigator.clipboard.writeText(ta.value); } catch (er) {} } return; }
+    else return;
     save(); render();
+    if (act === 'new-item' || act === 'it-dup') window.scrollTo(0, 0);
   });
 
-  function doExport() {
-    var blob = new Blob([JSON.stringify(state, null, 1)], { type: 'application/json' });
-    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'menu-repricer-backup.json';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  }
-  function doImport(file) {
-    if (!file) return; var r = new FileReader();
-    r.onload = function () { try { state = merge(JSON.parse(r.result)); save(); render(); } catch (e) { alert('فایل معتبر نیست'); } };
-    r.readAsText(file);
-  }
-
-  function demo() {
-    // Illustrative numbers only (tomans); replace with your own prices.
-    var I = function (id, name, unit, price, prev, trim) { return { id: id, name: name, unit: unit, price: price, prevPrice: prev, trimmable: trim !== false }; };
-    state = merge({
-      ingredients: [
-        I('mozz', 'پنیر پیتزا (موزارلا)', 'kg', 650000, 500000),
-        I('proc', 'پنیر پروسسی', 'kg', 380000, 340000),
-        I('dough', 'خمیر', 'kg', 60000, 55000),
-        I('sauce', 'سس گوجه', 'kg', 120000, 110000),
-        I('chick', 'سینه مرغ', 'kg', 480000, 380000, false),
-        I('bread', 'نان ساندویچی', 'piece', 12000, 10000),
-        I('oil', 'روغن سرخ‌کردنی', 'l', 250000, 58000 * 1.2)
-      ],
-      items: [
-        { id: 'pz', name: 'پیتزا مخصوص', price: 450000, sales: 300, lines: [{ ingId: 'mozz', amount: 140 }, { ingId: 'dough', amount: 250 }, { ingId: 'sauce', amount: 60 }, { ingId: 'chick', amount: 60 }] },
-        { id: 'sw', name: 'ساندویچ مرغ', price: 260000, sales: 500, lines: [{ ingId: 'bread', amount: 1 }, { ingId: 'chick', amount: 110 }, { ingId: 'sauce', amount: 25 }, { ingId: 'oil', amount: 30 }] }
-      ],
-      subs: [{ id: 's1', fromId: 'mozz', toId: 'proc', ratio: 1, maxShare: 40 }],
-      settings: { targetFC: 30, minPortion: 85, roundTo: 5000, elasticity: 1.2, qualityDrop: 3 }
-    });
-  }
-
-  window.addEventListener('online', function () { if (S && S.user() && S.meta().dirty) syncNow(false); });
+  window.addEventListener('online', function () { if (S && S.user() && S.meta().dirty) syncNow(0); });
+  // weekly reminder also when the app is opened again
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && (tab === 'prods' || tab === 'ings' || tab === 'chg')) render(); });
   paintStat();
   render();
   if (S && S.user() && navigator.onLine !== false) reconcile(false);
