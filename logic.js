@@ -11,7 +11,7 @@
   // ---------- state shape ----------
   function blank() {
     return {
-      v: 2, ingredients: [], packs: [], items: [], subs: [],
+      v: 2, ingredients: [], packs: [], items: [], subs: [], wastes: [],
       profile: { type: '', customName: '', done: false },
       settings: { targetFC: 30, minPortion: 85, roundTo: 5000, elasticity: 1.2, qualityDrop: 3,
         mode: 'simple', wage: 0, overheadPct: 0, remindDays: 7, shopName: '', contact: '',
@@ -32,11 +32,12 @@
     });
     d.packs = (s.packs || []).map(function (p) { p = copy(p); p.price = num(p.price); p.u = num(p.u); return p; });
     d.items = (s.items || []).map(function (it) {
-      it = copy(it); it.lines = it.lines || []; it.pk = it.pk || []; it.u = num(it.u);
+      it = copy(it); it.lines = it.lines || []; it.pk = it.pk || []; it.waste = it.waste || []; it.u = num(it.u);
       it.yield = Math.max(1, num(it.yield) || 1); it.mode = it.mode === 'kg' ? 'kg' : 'piece';
       return it;
     });
     d.subs = (s.subs || []).map(function (x) { x = copy(x); x.u = num(x.u); return x; });
+    d.wastes = (s.wastes || []).map(function (w) { w = copy(w); w.unit = w.unit === 'piece' ? 'piece' : 'kg'; w.price = num(w.price); w.u = num(w.u); return w; });
     if (s.profile) for (var p in s.profile) d.profile[p] = s.profile[p];
     // old v1 users already worked without the setup step
     if (!s.v && (d.items.length || d.ingredients.length)) d.profile.done = true;
@@ -51,12 +52,14 @@
 
   // remove references to things that no longer exist
   function cleanup(st) {
-    var ing = {}, pk = {};
+    var ing = {}, pk = {}, ws = {};
     st.ingredients.forEach(function (g) { ing[g.id] = 1; });
+    (st.wastes || []).forEach(function (w) { ws[w.id] = 1; });
     st.packs.forEach(function (p) { pk[p.id] = 1; });
     st.items.forEach(function (it) {
       it.lines = it.lines.filter(function (l) { return ing[l.ingId]; });
       it.pk = it.pk.filter(function (l) { return pk[l.packId]; });
+      it.waste = (it.waste || []).filter(function (l) { return ws[l.wasteId]; });
     });
     st.subs = st.subs.filter(function (x) { return ing[x.fromId] && ing[x.toId]; });
     return st;
@@ -86,6 +89,7 @@
     out.packs = mergeList(a.packs, b.packs, a.del, b.del);
     out.items = mergeList(a.items, b.items, a.del, b.del);
     out.subs = mergeList(a.subs, b.subs, a.del, b.del);
+    out.wastes = mergeList(a.wastes, b.wastes, a.del, b.del);
     var newer = num(b.su) > num(a.su) ? b : a;
     out.settings = copy(newer.settings); out.profile = copy(newer.profile); out.su = Math.max(num(a.su), num(b.su));
     out.meta = copy(a.meta);
@@ -106,7 +110,8 @@
     var m = {}; (state.packs || []).forEach(function (i) { m[i.id] = i; }); return m;
   }
   // context passed around: ingredient map, packaging map, settings
-  function ctx(state) { return { ing: buildMap(state), pk: packMap(state), s: state.settings || {} }; }
+  function wasteMap(state) { var m = {}; (state.wastes || []).forEach(function (w) { m[w.id] = w; }); return m; }
+  function ctx(state) { return { ing: buildMap(state), pk: packMap(state), ws: wasteMap(state), s: state.settings || {} }; }
   function full(c) { return (c.s && c.s.mode) === 'full'; }
   function ovF(c) { return full(c) ? Math.max(0, num(c.s.overheadPct)) / 100 : 0; }
 
@@ -139,13 +144,22 @@
     var t = 0; (item.pk || []).forEach(function (l) { var p = c.pk[l.packId]; if (p) t += num(l.qty) * num(p.price); });
     return t;
   }
-  // parts of the cost of ONE sold unit
+  // money the batch brings back by selling its waste (bones, peels, used oil...)
+  function wasteCredit(item, c) {
+    var t = 0;
+    (item.waste || []).forEach(function (l) {
+      var w = c.ws && c.ws[l.wasteId]; if (!w) return;
+      t += w.unit === 'piece' ? num(l.amount) * num(w.price) : num(l.amount) / 1000 * num(w.price);
+    });
+    return t;
+  }
+  // parts of the cost of ONE sold unit (wst = waste sales taken off the cost)
   function parts(item, c, usePrev) {
     var d = divisor(item, c), ing = batchIng(item, c, usePrev), lab = labour(item, c);
-    return { ing: ing / d, lab: lab / d, ovh: (ing + lab) * ovF(c) / d, pack: packCost(item, c) };
+    return { ing: ing / d, lab: lab / d, ovh: (ing + lab) * ovF(c) / d, pack: packCost(item, c), wst: wasteCredit(item, c) / d };
   }
   function unitCost(item, c, usePrev) {
-    var p = parts(item, c, usePrev); return p.ing + p.lab + p.ovh + p.pack;
+    var p = parts(item, c, usePrev); return Math.max(0, p.ing + p.lab + p.ovh + p.pack - p.wst);
   }
   // one ingredient-cost unit in the batch -> its effect on one sold unit
   function perUnit(item, c) { return (1 + ovF(c)) / divisor(item, c); }
@@ -309,7 +323,7 @@
     var q = num(packQty); return q > 0 ? num(packPrice) / q : 0;
   }
 
-  return { num: num, blank: blank, normalize: normalize, cleanup: cleanup, mergeStates: mergeStates, sameData: sameData,
+  return { wasteCredit: wasteCredit, num: num, blank: blank, normalize: normalize, cleanup: cleanup, mergeStates: mergeStates, sameData: sameData,
     buildMap: buildMap, packMap: packMap, ctx: ctx, lineCost: lineCost, batchIng: batchIng, labour: labour,
     divisor: divisor, packCost: packCost, parts: parts, unitCost: unitCost, itemTarget: itemTarget, roundUp: roundUp,
     suggest: suggest, explain: explain, keepPlan: keepPlan, scenarios: scenarios, sizeRows: sizeRows,

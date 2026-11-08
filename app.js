@@ -14,6 +14,8 @@
   var focusSel = null;
   var cardOpt = { theme: 'berry', pick: null, wholesale: false };
   var urls = [];
+  var POLICY_V = '1.0', VER = '0.8';
+  var gf = { mode: 'up', first: '', last: '', phone: '', city: '', pass: '', agree: false, msg: '' };   // sign-up form
 
   // ---------- storage ----------
   function load() {
@@ -73,6 +75,9 @@
   function packOptions(sel) {
     return state.packs.map(function (i) { return '<option value="' + i.id + '"' + (i.id === sel ? ' selected' : '') + '>' + esc(i.name || '(بدون نام)') + '</option>'; }).join('');
   }
+  function wasteOptions(sel) {
+    return state.wastes.map(function (i) { return '<option value="' + i.id + '"' + (i.id === sel ? ' selected' : '') + '>' + esc(i.name || '(بدون نام)') + '</option>'; }).join('');
+  }
   function unitWord(it) { return it.mode === 'kg' ? 'هر کیلوگرم' : 'هر عدد'; }
 
   // set an ingredient price and keep its history ("rose 12% in 30 days")
@@ -91,7 +96,7 @@
   // ---------- titles ----------
   function titleOf() {
     var w = W();
-    var t = { prods: w.many, prod: w.one, ings: 'مواد اولیه', packs: 'بسته‌بندی', quick: 'قیمت سریع', setup: 'راه‌اندازی', chg: 'ثبت قیمت جدید', res: 'پیشنهاد قیمت', cards: 'کارت و فهرست قیمت', sub: 'جایگزین‌ها', set: 'تنظیمات', acc: 'حساب', help: 'راهنما' };
+    var t = { prods: w.many, prod: w.one, ings: 'مواد اولیه', packs: 'بسته‌بندی', quick: 'قیمت سریع', setup: 'راه‌اندازی', chg: 'ثبت قیمت جدید', res: 'پیشنهاد قیمت', cards: 'کارت و فهرست قیمت', sub: 'جایگزین‌ها', set: 'تنظیمات', acc: 'حساب', help: 'راهنما', waste: 'ضایعات قابل فروش', policy: 'سیاست‌ها و شرایط', gate: gf.mode === 'in' ? 'ورود' : (gateMode() === 'prof' ? 'تکمیل مشخصات' : 'ساخت حساب') };
     return t[tab] || NAME;
   }
 
@@ -176,7 +181,7 @@
     h += '<div class="grid2"><div><span class="lbl">قیمت فروش ' + unitWord(it) + '</span>' + numField('it-price', it.price, ' aria-label="قیمت فروش"', true) + '</div>' +
       '<div><span class="lbl">فروش ماهانه (اختیاری)</span>' + numField('it-sales', it.sales || '', ' aria-label="فروش ماهانه"') + '</div></div>';
     if (it.mode === 'kg') h += '<div><span class="lbl">کاهش وزن بعد از پخت (%)</span>' + numField('it-cook', it.cookLoss || '', ' max="90"') + '<p class="hintline">وزن مواد را قبل و بعد از پخت بسنجید. قیمت بر اساس وزن نهایی حساب می‌شود.</p></div>';
-    else if (showSw('batch')) h += '<div><span class="lbl">این دستور چند عدد می‌شود؟</span>' + numField('it-yield', it.yield > 1 ? it.yield : '', ' placeholder="1"') + '<p class="hintline">مقدار مواد پایین برای کل این دستور است. هزینهٔ هر عدد از تقسیم حساب می‌شود.</p></div>';
+    else if (showSw('batch')) h += '<div><span class="lbl">این دستور چند عدد می‌شود؟</span>' + numField('it-yield', it.yield > 1 ? it.yield : '', ' placeholder="1"') + '<p class="hintline">مقدار مواد پایین برای کل این دستور است. هزینهٔ هر عدد از تقسیم حساب می‌شود. اگر مقدار مواد را برای یک عدد نوشته‌اید، همان 1 را بگذارید یا خالی بگذارید.</p></div>';
     h += '</div>';
 
     // ingredients
@@ -202,6 +207,21 @@
           '<button class="x" data-act="pk-del" aria-label="حذف">' + ICON('close') + '</button></div>';
       });
       h += '<button class="btn sm" data-act="pk-add">' + ICON('plus') + 'بسته‌بندی</button>';
+    }
+    h += '</div>';
+
+    // sellable waste
+    h += '<div class="sec" data-grp="wl"><h3>ضایعات قابل فروش (کل دستور)</h3>';
+    if (!state.wastes.length) h += '<p class="mute">اگر از کار چیزی می‌ماند که می‌فروشید (استخوان، پوست، روغن...)، اول در منو بخش «ضایعات قابل فروش» آن را ثبت کنید.</p><button class="btn block" data-act="go-waste">رفتن به ضایعات</button>';
+    else {
+      (it.waste || []).forEach(function (l, idx) {
+        var wz1 = c.ws[l.wasteId];
+        h += '<div class="line" data-line="' + idx + '"><select data-f="wl-sel" aria-label="ضایعه">' + wasteOptions(l.wasteId) + '</select>' + numField('wl-amt', l.amount, ' aria-label="مقدار"') +
+          '<span class="u">' + (wz1 ? (wz1.unit === 'piece' ? 'عدد' : 'گرم') : '') + (wz1 ? '<br><span class="mini">' + fmt(L.wasteCredit({ waste: [l] }, c)) + '</span>' : '') + '</span>' +
+          '<button class="x" data-act="wl-del" aria-label="حذف">' + ICON('close') + '</button></div>';
+      });
+      h += '<button class="btn sm" data-act="wl-add">' + ICON('plus') + 'ضایعه</button>';
+      if (p.wst > 0) h += '<p class="hintline">فروش ضایعات از هزینهٔ هر واحد <b>' + fmt(p.wst) + '</b> تومان کم کرده است.</p>';
     }
     h += '</div>';
 
@@ -632,13 +652,13 @@
   function setCloud(kind, msg) { cloud.kind = kind; cloud.msg = msg; paintStat(); if (tab === 'acc') render(); }
   function paintStat() {
     var el = document.getElementById('syncstat'); if (!el) return;
-    var who = document.getElementById('who'); if (who) who.textContent = (S && S.user()) ? (S.user().email || '') : 'بدون حساب';
+    var who = document.getElementById('who'); if (who) { var pf = (S && S.user() && S.meta().prof) || null; who.textContent = (S && S.user()) ? (pf && pf.first ? pf.first + ' ' + (pf.last || '') : (S.user().email || '')) : 'بدون حساب'; }
     if (!S || !S.user()) { el.textContent = ''; el.className = 'sync'; return; }
     var offline = cloud.kind === 'err';
     var t = cloud.busy ? '… همگام‌سازی' : offline ? '⚠ بدون اتصال' : (S.meta().dirty ? '● روی گوشی ذخیره شد' : '✓ ذخیره در ابر');
     el.textContent = t; el.className = 'sync' + (offline ? ' bad' : '');
   }
-  function profile() { var m = S.meta(); return { city: m.city || '', share: !!m.share }; }
+  function profile() { var m = S.meta(); return { city: m.city || '', share: true }; }
   function scheduleSync() { clearTimeout(cloud.timer); paintStat(); cloud.timer = setTimeout(function () { syncNow(0); }, 1500); }
   // push; when another device saved in between, merge item by item and try again
   function syncNow(tries, force) {
@@ -662,12 +682,13 @@
   // after login or on start: merge this device with the cloud, item by item
   function reconcile(justLoggedIn) {
     if (!S || !S.user()) return Promise.resolve();
+    ensureProfile();
     cloud.busy = true; paintStat();
     return S.pull().then(function (row) {
       cloud.busy = false;
       var m = S.meta();
       if (!row) { m.lastSynced = null; return syncNow(0); }
-      m.city = row.city || ''; m.share = !!row.share_prices;
+      m.city = row.city || m.city || '';
       if (!justLoggedIn && m.lastSynced === row.updated_at) { return m.dirty ? syncNow(0) : setCloud('ok', 'همه‌چیز همگام است.'); }
       var remote = L.normalize(row.state || {}), merged = L.mergeStates(state, remote);
       state = merged; saveLocal(); m.lastSynced = row.updated_at;
@@ -702,10 +723,12 @@
         (cloud.msg ? '<p class="mute" style="margin:0">' + esc(cloud.msg) + '</p>' : '') +
         '<p class="mute sm" style="margin:0">اگر روی دو گوشی کار کنید، تغییرات هر مورد جدا ترکیب می‌شود و آخرین تغییر همان مورد می‌ماند.</p>' +
         '<div class="grid2"><button class="btn" data-act="acc-sync">همگام‌سازی الان</button><button class="btn" data-act="acc-out">خروج</button></div></div>' +
-        '<div class="sec stack"><h3>مشخصات کسب‌وکار</h3>' +
-        '<div><label class="lbl" for="acc-city">شهر</label><input id="acc-city" value="' + esc(m.city || '') + '" placeholder="مثلاً مشهد"></div>' +
-        '<label class="switch" style="align-items:flex-start"><input type="checkbox" id="acc-share"' + (m.share ? ' checked' : '') + '> <span>اجازه می‌دهم در آینده قیمت مواد من ناشناس برای مقایسهٔ قیمت بین مغازه‌ها استفاده شود. در این نسخه هنوز هیچ دادهٔ شما با کسی به اشتراک گذاشته نمی‌شود.</span></label>' +
-        '<button class="btn" data-act="acc-prof">ذخیرهٔ مشخصات</button></div>' +
+        '<div class="sec stack"><h3>مشخصات شما</h3>' +
+        '<div class="grid2"><div><label class="lbl" for="acc-first">نام</label><input id="acc-first" value="' + esc((m.prof || {}).first || '') + '"></div><div><label class="lbl" for="acc-last">نام خانوادگی</label><input id="acc-last" value="' + esc((m.prof || {}).last || '') + '"></div></div>' +
+        '<div><label class="lbl">شمارهٔ موبایل</label><input value="' + esc((m.prof || {}).phone || '') + '" dir="ltr" disabled></div>' +
+        '<div><label class="lbl" for="acc-city">شهر</label><input id="acc-city" value="' + esc(m.city || '') + '" list="gf-cities"></div>' +
+        '<button class="btn" data-act="acc-prof">ذخیرهٔ مشخصات</button>' +
+        '<button class="btn block" data-act="go-policy">سیاست‌ها و شرایط استفاده</button></div>' +
         '<div class="sec"><details><summary>اگر همگام‌سازی درست کار نکرد</summary><div class="stack"><button class="btn block" data-act="acc-usecloud">فقط نسخهٔ ابر را بگیر (اطلاعات این گوشی کنار گذاشته می‌شود)</button><button class="btn block danger" data-act="acc-usethis">اطلاعات ابر را با این گوشی عوض کن</button></div></details></div>' +
         '<div class="sec stack"><h3>حذف اطلاعات ابری</h3><p class="mute" style="margin:0">اطلاعات شما در ابر پاک می‌شود؛ نسخهٔ روی این گوشی می‌ماند. برای حذف کامل خود حساب، به ما پیام دهید.</p><button class="btn danger" data-act="acc-del">حذف اطلاعات من از ابر</button></div>';
     }
@@ -725,11 +748,11 @@
     } else if (act === 'acc-out') {
       if (S.meta().dirty && !confirm('تغییرات اخیر هنوز در ابر ذخیره نشده‌اند. با خروج، اطلاعات این دستگاه پاک می‌شود و آن تغییرات از دست می‌روند. ادامه؟')) return;
       if (!confirm('با خروج، اطلاعات از روی این گوشی پاک می‌شود (در ابر می‌ماند). خروج؟')) return;
-      S.signOut(); state = L.blank(); saveLocal(); wz = null; cloud = { kind: '', msg: '', busy: false, timer: null, checked: cloud.checked }; tab = 'setup'; paintStat(); render();
+      S.signOut(); state = L.blank(); saveLocal(); wz = null; cloud = { kind: '', msg: '', busy: false, timer: null, checked: cloud.checked }; tab = 'setup'; gf = { mode: 'in', first: '', last: '', phone: '', city: '', pass: '', agree: false, msg: '' }; paintStat(); render();
     } else if (act === 'acc-sync') { reconcile(false); }
     else if (act === 'acc-usecloud') { S.pull().then(function (row) { if (row) adopt(row.state || {}, row.updated_at); }).catch(function (e) { setCloud('err', (e && e.text) || 'اتصال برقرار نشد'); }); }
     else if (act === 'acc-usethis') { if (confirm('اطلاعات ابر با اطلاعات این دستگاه جایگزین شود؟')) syncNow(0, true); }
-    else if (act === 'acc-prof') { var m = S.meta(); m.city = v('acc-city'); m.share = !!(document.getElementById('acc-share') || {}).checked; S.saveMeta(); S.markDirty(); syncNow(0); }
+    else if (act === 'acc-prof') { var m = S.meta(), pr = m.prof || {}; m.city = v('acc-city'); m.prof = { first: v('acc-first') || pr.first, last: v('acc-last') || pr.last, phone: pr.phone, city: m.city, v: pr.v || POLICY_V, at: pr.at || new Date().toISOString() }; S.saveMeta(); S.markDirty(); S.saveProfile({ user_id: S.user().id, first_name: m.prof.first, last_name: m.prof.last, phone: m.prof.phone, city: m.city, policy_version: m.prof.v, accepted_at: m.prof.at, app_version: VER }).catch(function () {}); syncNow(0); setCloud('ok', 'مشخصات ذخیره شد.'); }
     else if (act === 'acc-del') { if (!confirm('اطلاعات شما از ابر حذف شود؟')) return; S.deleteCloud().then(function () { setCloud('ok', 'اطلاعات ابری حذف شد.'); }).catch(function (e) { setCloud('err', (e && e.text) || 'اتصال برقرار نشد'); }); }
     else if (act === 'acc-check') {
       cloud.checked = 'در حال بررسی…'; render();
@@ -738,12 +761,141 @@
     }
   }
 
+  // ======================================================= sellable waste
+  function viewWaste() {
+    var w = W();
+    var h = lead('ضایعات قابل فروش', 'هر چیزی که از کار می‌ماند و می‌فروشید، مثل استخوان یا روغن مصرف‌شده. اینجا اسم و قیمت فروشش را بنویسید؛ مقدارش را داخل هر ' + w.one + ' می‌نویسید و از هزینه کم می‌شود.');
+    if (!state.wastes.length) return h + empty('هنوز ضایعه‌ای ثبت نکرده‌اید', 'مثلاً «استخوان» یا «روغن مصرف‌شده».', [['ws-add', 'افزودن ضایعه', true]]);
+    state.wastes.forEach(function (x) {
+      var n = state.items.filter(function (it) { return (it.waste || []).some(function (l) { return l.wasteId === x.id; }); }).length;
+      h += '<div class="item" data-id="' + x.id + '"><div class="rowx"><div class="grow"><input data-f="ws-name" value="' + esc(x.name) + '" placeholder="مثلاً استخوان" aria-label="نام ضایعه"></div><button class="x" data-act="ws-del" aria-label="حذف">' + ICON('trash') + '</button></div>' +
+        '<div class="grid2" style="margin-top:8px"><div><span class="lbl">اندازه‌گیری با</span><select data-f="ws-unit" aria-label="واحد"><option value="kg"' + (x.unit === 'kg' ? ' selected' : '') + '>کیلوگرم</option><option value="piece"' + (x.unit === 'piece' ? ' selected' : '') + '>عدد</option></select></div>' +
+        '<div><span class="lbl">قیمت فروش هر ' + (x.unit === 'piece' ? 'عدد' : 'کیلوگرم') + '</span>' + numField('ws-price', x.price, ' aria-label="قیمت فروش"', true) + '</div></div>' +
+        '<p class="mute sm" style="margin:8px 0 0">' + (n ? 'در ' + n + ' ' + esc(w.one) + ' استفاده شده.' : 'هنوز در هیچ ' + esc(w.one) + ' استفاده نشده؛ مقدارش را داخل خود ' + esc(w.one) + ' بنویسید.') + '</p></div>';
+    });
+    return h + '<button class="btn pri block" data-act="ws-add">' + ICON('plus') + 'ضایعهٔ جدید</button>';
+  }
+
+  // ======================================================= sign-up gate and policies
+  var CITIES = ['مشهد', 'تهران', 'اصفهان', 'شیراز', 'تبریز', 'کرج', 'قم', 'اهواز', 'کرمانشاه', 'ارومیه', 'رشت', 'زاهدان', 'کرمان', 'همدان', 'یزد', 'اردبیل', 'بندرعباس', 'اراک', 'زنجان', 'سنندج', 'قزوین', 'خرم‌آباد', 'گرگان', 'ساری', 'بجنورد', 'بیرجند', 'نیشابور', 'سبزوار', 'قوچان', 'بوشهر', 'ایلام', 'سمنان', 'شهرکرد', 'یاسوج', 'کاشان'];
+  function gateMode() {
+    if (!S || !S.configured()) return null;
+    if (!S.user()) return gf.mode === 'in' ? 'in' : 'up';
+    var m = S.meta(); return (m.prof && m.prof.first && m.prof.phone) ? null : 'prof';
+  }
+  function normPhone(x) {
+    x = String(x || '').replace(/[۰-۹]/g, function (d) { return '۰۱۲۳۴۵۶۷۸۹'.indexOf(d); }).replace(/[٠-٩]/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'.indexOf(d); }).replace(/[\s\-()]/g, '');
+    var m = x.match(/^(?:\+98|0098|98|0)?(9\d{9})$/); return m ? '0' + m[1] : '';
+  }
+  function viewGate() {
+    var gm = gateMode() || gf.mode, h = '';
+    if (gm === 'in') {
+      h += lead('ورود به ' + NAME, 'شمارهٔ موبایل و رمز عبوری که موقع ثبت‌نام ساخته‌اید.');
+      h += '<div class="sec stack"><div><label class="lbl" for="gf-phone">شمارهٔ موبایل</label><input id="gf-phone" data-f="gf-phone" dir="ltr" inputmode="tel" autocomplete="username" placeholder="09123456789" value="' + esc(gf.phone) + '"></div>' +
+        '<div><label class="lbl" for="gf-pass">رمز عبور</label><input id="gf-pass" data-f="gf-pass" type="password" dir="ltr" autocomplete="current-password" value="' + esc(gf.pass) + '"></div>' +
+        (gf.msg ? '<div class="note warn">' + esc(gf.msg) + '</div>' : '') +
+        '<button class="btn pri block" data-act="gf-in">ورود</button>' +
+        '<button class="btn block" data-act="gf-mode-up">حساب ندارم؛ ثبت‌نام</button></div>';
+      return h;
+    }
+    var prof = gm === 'prof';
+    h += lead(prof ? 'مشخصات خود را کامل کنید' : 'ساخت حساب', prof ? 'برای ادامه، این مشخصات و پذیرفتن سیاست‌ها لازم است.' : 'برای استفاده از ' + NAME + ' حساب لازم است. بعداً برای تأیید شماره، پیامک هم می‌فرستیم.');
+    h += '<div class="sec stack">' +
+      '<div class="grid2"><div><label class="lbl" for="gf-first">نام</label><input id="gf-first" data-f="gf-first" autocomplete="given-name" value="' + esc(gf.first) + '"></div>' +
+      '<div><label class="lbl" for="gf-last">نام خانوادگی</label><input id="gf-last" data-f="gf-last" autocomplete="family-name" value="' + esc(gf.last) + '"></div></div>' +
+      '<div><label class="lbl" for="gf-phone">شمارهٔ موبایل</label><input id="gf-phone" data-f="gf-phone" dir="ltr" inputmode="tel" autocomplete="tel" placeholder="09123456789" value="' + esc(gf.phone) + '"></div>' +
+      '<div><label class="lbl" for="gf-city">شهر</label><input id="gf-city" data-f="gf-city" list="gf-cities" autocomplete="address-level2" value="' + esc(gf.city) + '"><datalist id="gf-cities">' + CITIES.map(function (c) { return '<option value="' + c + '">'; }).join('') + '</datalist></div>' +
+      (prof ? '' : '<div><label class="lbl" for="gf-pass">رمز عبور (حداقل 8 کاراکتر)</label><input id="gf-pass" data-f="gf-pass" type="password" dir="ltr" autocomplete="new-password" value="' + esc(gf.pass) + '"></div>') +
+      '<label class="switch" style="align-items:flex-start"><input type="checkbox" data-f="gf-agree"' + (gf.agree ? ' checked' : '') + '> <span>سیاست حفظ حریم خصوصی و شرایط استفاده را خوانده‌ام و می‌پذیرم، و موافقم که اطلاعاتی که در برنامه وارد می‌کنم دیده و طبق آن سیاست‌ها استفاده شود. <a href="#" data-act="go-policy">خواندن سیاست‌ها</a></span></label>' +
+      (gf.msg ? '<div class="note warn">' + esc(gf.msg) + '</div>' : '') +
+      '<button class="btn pri block" id="gf-btn" data-act="' + (prof ? 'gf-prof' : 'gf-up') + '"' + (gf.agree ? '' : ' disabled') + '>' + (prof ? 'ذخیره و ادامه' : 'ساخت حساب') + '</button>' +
+      (prof ? '' : '<button class="btn block" data-act="gf-mode-in">قبلاً ثبت‌نام کرده‌ام؛ ورود</button>') + '</div>';
+    return h;
+  }
+  var POLICY = [
+    ['۱. دربارهٔ این برنامه', ['«' + NAME + '» ابزاری برای حساب‌کردن هزینه و قیمت‌گذاری محصولات کسب‌وکارهای کوچک است. با ساختن حساب و استفاده از برنامه، این شرایط را می‌پذیرید. استفاده از برنامه مخصوص افراد 18 سال به بالاست.']],
+    ['۲. چه اطلاعاتی جمع می‌شود', ['اطلاعات حساب: نام، نام خانوادگی، شمارهٔ موبایل و شهر. رمز عبور شما به شکل رمزنگاری‌شده نگهداری می‌شود و ما آن را نمی‌بینیم.',
+      'اطلاعات کار با برنامه: نوع کسب‌وکار، نام و قیمت مواد و تاریخچهٔ تغییر قیمت‌ها، مقدار مصرف هر ماده در هر دستور، نام محصولات، قیمت فروش و تاریخچهٔ آن، فروش ماهانه، بسته‌بندی، ضایعات و قیمت فروش آن‌ها، دستمزد و سربار، تنظیمات و هر چیز دیگری که در برنامه وارد می‌کنید.',
+      'اطلاعات فنی: زمان ورود، نسخهٔ برنامه و نوع دستگاه به شکل کلی.']],
+    ['۳. اطلاعات برای چه کاری استفاده می‌شود', ['برای ساختن و نگهداری حساب شما، ذخیره و همگام‌سازی اطلاعاتتان بین دستگاه‌ها، بهتر کردن برنامه، پشتیبانی، و فرستادن پیامک تأیید و اطلاع‌رسانی.',
+      'همچنین برای تحلیل بازار و آمار: مثلاً میانگین قیمت مواد در هر شهر، روند قیمت‌ها و الگوی مصرف. این آمارها به شکل تجمیعی و بدون نام و شماره تهیه می‌شوند. ممکن است بر پایهٔ آن‌ها خدمات تازه‌ای مانند پیشنهاد خرید مواد با قیمت مناسب‌تر ارائه شود.']],
+    ['۴. اینکه چه کسی اطلاعات را می‌بیند', ['اطلاعات اختصاصی شما (قیمت‌ها، دستورها، مقدارها و ضایعات) به رقبا، مغازه‌ها یا شرکت‌های دیگر داده نمی‌شود و رقبا به آن دسترسی ندارند.',
+      'تیم نگهدارندهٔ برنامه برای ارائهٔ خدمت و تحلیل، به اطلاعات شما دسترسی دارد و با پذیرفتن این سیاست با آن موافقت می‌کنید.',
+      'اطلاعات فقط در این موارد بیرون از تیم می‌رود: آمار تجمیعی و بدون نام (بند ۳)، ارائه‌دهندگان فنی که برنامه را میزبانی می‌کنند و ناچارند آن را نگه دارند، و مواردی که قانون یا مرجع قضایی صالح رسماً درخواست کند.']],
+    ['۵. نگهداری و امنیت', ['اطلاعات شما روی سرویس ابری نگهداری می‌شود و ممکن است سرورها خارج از ایران باشند. از ابزارهای معمول امنیتی استفاده می‌شود، اما هیچ سامانه‌ای امنیت کامل ندارد. رمز عبور خود را به کسی ندهید و رمز قوی بگذارید.']],
+    ['۶. حق شما', ['می‌توانید اطلاعات خود را در برنامه ببینید و اصلاح کنید. با «حذف اطلاعات من از ابر» (در بخش حساب) اطلاعات ذخیره‌شدهٔ شما حذف می‌شود. برای حذف کامل حساب، با ما تماس بگیرید. آمار تجمیعی و بدون نام که قبلاً ساخته شده، قابل برگشت به شما نیست.']],
+    ['۷. مسئولیت', ['قیمت‌ها و پیشنهادهای برنامه فقط راهنمای محاسبه‌اند و بر پایهٔ عددهایی است که خودتان وارد کرده‌اید. سود، فروش یا درستی نتیجه تضمین نمی‌شود و تصمیم نهایی دربارهٔ قیمت و کار با شماست. برنامه ممکن است گاهی قطع شود یا تغییر کند.',
+      'اطلاعاتی را وارد کنید که حق استفاده از آن را دارید. مسئولیت درستی اطلاعاتی که وارد می‌کنید با خودتان است.']],
+    ['۸. تغییر سیاست‌ها و قانون', ['ممکن است این سیاست‌ها تغییر کند؛ تغییر مهم در برنامه اطلاع داده می‌شود و ادامهٔ استفاده یعنی پذیرفتن آن. این شرایط تابع قوانین جمهوری اسلامی ایران است.']]
+  ];
+  function viewPolicy() {
+    var back = gateMode() ? 'go-gate' : 'go-acc';
+    var h = '<button class="back" data-act="' + back + '">' + ICON('back') + 'برگشت</button>' + lead('سیاست‌ها و شرایط استفاده', 'نسخهٔ ' + POLICY_V);
+    POLICY.forEach(function (sec) { h += '<div class="sec"><h3>' + sec[0] + '</h3>' + sec[1].map(function (p) { return '<p class="mute" style="margin:0 0 10px">' + esc(p) + '</p>'; }).join('') + '</div>'; });
+    return h;
+  }
+  function profFromRow(row) { return { first: row.first_name, last: row.last_name, phone: row.phone, city: row.city, v: row.policy_version, at: row.accepted_at }; }
+  function ensureProfile() {
+    if (!S || !S.user()) return Promise.resolve();
+    var m = S.meta();
+    var p = m.profilePending ? S.saveProfile(m.profilePending).then(function () { m.profilePending = null; S.saveMeta(); }).catch(function () {}) : Promise.resolve();
+    return p.then(function () {
+      if (m.prof && m.prof.first) return S.touchProfile(VER).catch(function () {});
+      return S.getProfile().then(function (row) {
+        if (row && row.first_name) { m.prof = profFromRow(row); if (row.city) m.city = row.city; S.saveMeta(); paintStat(); render(); }
+      }).catch(function () {});
+    });
+  }
+  function gateErr(t) { gf.msg = t; render(); }
+  function fixAuthText(t) { return String(t || '').replace('این ایمیل قبلاً ثبت شده است؛ وارد شوید.', 'این شماره قبلاً ثبت شده است؛ وارد شوید.').replace('ایمیل یا رمز عبور اشتباه است.', 'شماره یا رمز عبور اشتباه است.'); }
+  function readProfile(needPass) {
+    var ph = normPhone(gf.phone), p = { first_name: gf.first.trim(), last_name: gf.last.trim(), phone: ph, city: gf.city.trim(), policy_version: POLICY_V, accepted_at: new Date().toISOString(), app_version: VER };
+    if (!p.first_name || !p.last_name) return { err: 'نام و نام خانوادگی را بنویسید.' };
+    if (!ph) return { err: 'شمارهٔ موبایل را درست بنویسید، مثل 09123456789.' };
+    if (!p.city) return { err: 'شهر را بنویسید.' };
+    if (needPass && gf.pass.length < 8) return { err: 'رمز عبور حداقل 8 کاراکتر باشد.' };
+    if (!gf.agree) return { err: 'برای ادامه باید سیاست‌ها را بپذیرید.' };
+    return { p: p };
+  }
+  function finishProfile(p) {
+    var m = S.meta(); m.prof = { first: p.first_name, last: p.last_name, phone: p.phone, city: p.city, v: p.policy_version, at: p.accepted_at }; m.city = p.city; S.saveMeta();
+    p.user_id = S.user().id;
+    return S.saveProfile(p).then(function () { m.profilePending = null; S.saveMeta(); }).catch(function (e) { m.profilePending = p; S.saveMeta(); });
+  }
+  function gateAct(act) {
+    if (act === 'gf-mode-in') { gf.mode = 'in'; gf.msg = ''; render(); return; }
+    if (act === 'gf-mode-up') { gf.mode = 'up'; gf.msg = ''; render(); return; }
+    if (navigator.onLine === false) { gateErr('اینترنت وصل نیست. برای ساخت حساب و ورود، یک بار اینترنت لازم است.'); return; }
+    if (act === 'gf-up') {
+      var r = readProfile(true); if (r.err) { gateErr(r.err); return; }
+      gf.msg = 'در حال ساخت حساب…'; render();
+      S.signUp(S.phoneId(r.p.phone), gf.pass).then(function (res) {
+        if (res.needConfirm) { gateErr('ثبت‌نام نیاز به تأیید دارد. (در Supabase گزینهٔ Confirm email را خاموش کنید.)'); return; }
+        return finishProfile(r.p).then(function () { gf.pass = ''; gf.msg = ''; cloud.msg = ''; paintStat(); render(); return reconcile(true); });
+      }).catch(function (e) { gateErr(fixAuthText(e && e.text) || 'اتصال به سرور برقرار نشد.'); });
+    } else if (act === 'gf-in') {
+      var id = String(gf.phone || '').trim(), em = normPhone(id) ? S.phoneId(normPhone(id)) : '';
+      if (!em) { gateErr('شمارهٔ موبایل را درست بنویسید، مثل 09123456789.'); return; }
+      if (!gf.pass) { gateErr('رمز عبور را بنویسید.'); return; }
+      gf.msg = 'در حال ورود…'; render();
+      S.signIn(em, gf.pass).then(function () { gf.pass = ''; gf.msg = ''; return S.getProfile().catch(function () { return null; }); }).then(function (row) {
+        var m = S.meta(); if (row && row.first_name) { m.prof = profFromRow(row); if (row.city) m.city = row.city; S.saveMeta(); }
+        cloud.msg = ''; paintStat(); render(); return reconcile(true);
+      }).catch(function (e) { gateErr(fixAuthText(e && e.text) || 'اتصال به سرور برقرار نشد.'); });
+    } else if (act === 'gf-prof') {
+      var r2 = readProfile(false); if (r2.err) { gateErr(r2.err); return; }
+      finishProfile(r2.p).then(function () { gf.msg = ''; render(); return reconcile(false); });
+    }
+  }
+
   // ======================================================= render
-  var VIEWS = { prods: viewProds, prod: viewProd, ings: viewIngs, packs: viewPacks, quick: viewQuick, setup: viewSetup, chg: viewChg, res: viewRes, cards: viewCards, sub: viewSub, set: viewSet, acc: viewAcc, help: viewHelp };
+  var VIEWS = { waste: viewWaste, gate: viewGate, policy: viewPolicy, prods: viewProds, prod: viewProd, ings: viewIngs, packs: viewPacks, quick: viewQuick, setup: viewSetup, chg: viewChg, res: viewRes, cards: viewCards, sub: viewSub, set: viewSet, acc: viewAcc, help: viewHelp };
   var rendering = false;
   function render() {
     if (rendering) { setTimeout(render, 0); return; }
     rendering = true;
+    var gm = gateMode(); if (gm) { if (tab !== 'policy') tab = 'gate'; } else if (tab === 'gate') tab = state.profile.done ? 'prods' : 'setup';
+    document.body.classList.toggle('gated', !!gm);
     var v = document.getElementById('view');
     try { var ae = document.activeElement; if (ae && v.contains(ae) && ae.blur) ae.blur(); } catch (e) {}
     try { v.innerHTML = VIEWS[tab](); } finally { rendering = false; }
@@ -752,7 +904,7 @@
     Array.prototype.forEach.call(document.querySelectorAll('#nav [data-nav]'), function (b) { b.classList.toggle('on', b.getAttribute('data-nav') === nm); });
     var ti = document.getElementById('title'); if (ti) ti.textContent = titleOf();
     var np = document.querySelector('#nav-prods span'); if (np) np.textContent = W().many;
-    document.body.classList.toggle('nonav', tab === 'setup' && !state.profile.done);
+    document.body.classList.toggle('nonav', (tab === 'setup' && !state.profile.done) || !!gm);
     Array.prototype.forEach.call(document.querySelectorAll('.appname'), function (e) { e.textContent = NAME; });
     if (focusSel) { var el = document.querySelector(focusSel); focusSel = null; if (el) { try { el.focus(); el.scrollIntoView({ block: 'center' }); } catch (e) {} } }
   }
@@ -856,6 +1008,7 @@
   // show the formatted amount under price fields while typing; live search; scale slider
   view.addEventListener('input', function (e) {
     var t = e.target, f = t.getAttribute && t.getAttribute('data-f');
+    if (f && f.indexOf('gf-') === 0) { if (t.type !== 'checkbox') gf[f.slice(3)] = t.value; return; }
     if (f === 'q-ing') { q.ing = t.value; document.getElementById('list').innerHTML = ingList(); return; }
     if (f === 'q-pk') { q.pk = t.value; document.getElementById('list').innerHTML = packList(); return; }
     if (f === 'q-prod') { q.prod = t.value; document.getElementById('list').innerHTML = prodCards(); return; }
@@ -870,6 +1023,7 @@
     var lineEl = closest(t, '[data-line]'), li = lineEl ? Number(lineEl.getAttribute('data-line')) : -1;
     var n = Number(t.value), k = t.getAttribute('data-k');
     if (f.indexOf('q-') === 0 || f === 'scale') return;
+    if (f.indexOf('gf-') === 0) { if (f === 'gf-agree') { gf.agree = t.checked; var gb = document.getElementById('gf-btn'); if (gb) gb.disabled = !gf.agree; } else gf[f.slice(3)] = t.value; return; }
     // wizard fields (no saving)
     if (f === 'wz-type') { wzPick(k); render(); return; }
     if (f === 'wz-cname') { wz.cname = t.value; return; }
@@ -910,10 +1064,10 @@
     else if (f === 'ing-trim') { g = find(state.ingredients, id); g.trimmable = t.checked; touch(g); }
     else if (f === 'pk-name') { p = find(state.packs, id); p.name = t.value; touch(p); }
     else if (f === 'pk-price') { p = find(state.packs, id); p.price = n; touch(p); }
-    else if (f.indexOf('it-') === 0 || f.indexOf('ln-') === 0 || f.indexOf('pk-') === 0 || f.indexOf('sz-') === 0) {
+    else if (f.indexOf('it-') === 0 || f.indexOf('ln-') === 0 || f.indexOf('pk-') === 0 || f.indexOf('sz-') === 0 || f.indexOf('wl-') === 0) {
       it = find(state.items, cur); if (!it) return;
       if (f === 'it-name') it.name = t.value;
-      else if (f === 'it-price') it.price = n;
+      else if (f === 'it-price') { if (it.price > 0 && n !== it.price) { if (!(it.priceHistory || []).length) it.priceHistory = [{ t: it.u || now() - 864e5, p: it.price }]; it.priceHistory = (it.priceHistory || []).concat([{ t: now(), p: n }]).slice(-40); } it.price = n; }
       else if (f === 'it-sales') it.sales = n;
       else if (f === 'it-cook') it.cookLoss = Math.min(90, Math.max(0, n));
       else if (f === 'it-yield') it.yield = Math.max(1, n || 1);
@@ -924,11 +1078,16 @@
       else if (f === 'ln-amt') it.lines[li].amount = n;
       else if (f === 'pk-sel') it.pk[li].packId = t.value;
       else if (f === 'pk-qty') it.pk[li].qty = n;
+      else if (f === 'wl-sel') it.waste[li].wasteId = t.value;
+      else if (f === 'wl-amt') it.waste[li].amount = n;
       else if (f === 'sz-name') it.sizes[li].name = t.value;
       else if (f === 'sz-factor') it.sizes[li].factor = n;
       else if (f === 'sz-price') it.sizes[li].price = n;
       touch(it);
     }
+    else if (f === 'ws-name') { p = find(state.wastes, id); p.name = t.value; touch(p); }
+    else if (f === 'ws-unit') { p = find(state.wastes, id); p.unit = t.value; touch(p); }
+    else if (f === 'ws-price') { p = find(state.wastes, id); p.price = n; touch(p); }
     else if (f === 'sb-from') { p = find(state.subs, id); p.fromId = t.value; touch(p); }
     else if (f === 'sb-to') { p = find(state.subs, id); p.toId = t.value; touch(p); }
     else if (f === 'sb-ratio') { p = find(state.subs, id); p.ratio = n; touch(p); }
@@ -945,6 +1104,7 @@
     var rowEl = closest(b, '[data-id]'), id = rowEl && rowEl.getAttribute('data-id');
     var lineEl = closest(b, '[data-line]'), li = lineEl ? Number(lineEl.getAttribute('data-line')) : -1;
     var it = tab === 'prod' ? find(state.items, cur) : null;
+    if (act.indexOf('gf-') === 0) { gateAct(act); return; }
     if (act.indexOf('acc-') === 0) { accAct(act); return; }
     if (act.indexOf('go-') === 0) { if (act === 'go-setup') wzStart(); go(act.slice(3)); return; }
     if (act === 'open') { go('prod', id); return; }
@@ -976,6 +1136,10 @@
     else if (act === 'it-dup') { if (!it) return; var cp = JSON.parse(JSON.stringify(it)); cp.id = uid(); cp.name = (it.name || '') + ' (کپی)'; cp.u = now(); state.items.push(cp); cur = cp.id; focusSel = '[data-f="it-name"]'; }
     else if (act === 'it-mode-piece') { if (it) { it.mode = 'piece'; touch(it); } }
     else if (act === 'it-mode-kg') { if (it) { it.mode = 'kg'; touch(it); } }
+    else if (act === 'ws-add') { state.wastes.push({ id: uid(), name: '', unit: 'kg', price: 0, u: now() }); }
+    else if (act === 'ws-del') { if (!confirm('حذف شود؟')) return; gone(id); state.wastes = state.wastes.filter(function (x) { return x.id !== id; }); state.items.forEach(function (x) { var n0 = (x.waste || []).length; x.waste = (x.waste || []).filter(function (l) { return l.wasteId !== id; }); if (x.waste.length !== n0) touch(x); }); }
+    else if (act === 'wl-add') { if (it && state.wastes.length) { it.waste = it.waste || []; it.waste.push({ wasteId: state.wastes[0].id, amount: 0 }); touch(it); } }
+    else if (act === 'wl-del') { it.waste.splice(li, 1); touch(it); }
     else if (act === 'ln-add') { if (it && state.ingredients.length) { it.lines.push({ ingId: state.ingredients[0].id, amount: 0 }); touch(it); } }
     else if (act === 'ln-del') { it.lines.splice(li, 1); touch(it); }
     else if (act === 'pk-add') { if (it && state.packs.length) { it.pk.push({ packId: state.packs[0].id, qty: 1 }); touch(it); } }
@@ -988,7 +1152,7 @@
     else if (act === 'reset') {
       if (!confirm('همهٔ داده‌ها پاک شود؟' + (S && S.user() ? ' (اگر وارد حساب هستید، نسخهٔ ابری هم پاک می‌شود.)' : ''))) return;
       var dd = state.del || {}, t0 = now();
-      [].concat(state.ingredients, state.packs, state.items, state.subs).forEach(function (x) { dd[x.id] = t0; });   // so a merge cannot bring them back
+      [].concat(state.ingredients, state.packs, state.items, state.subs, state.wastes).forEach(function (x) { dd[x.id] = t0; });   // so a merge cannot bring them back
       state = L.blank(); state.su = t0; state.del = dd; wz = null; tab = 'setup';
     }
     else if (act === 'mode-simple') { state.settings.mode = 'simple'; touchSettings(); }

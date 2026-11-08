@@ -121,6 +121,24 @@
         return res;
       });
     },
+    // sign-in name for a phone number (real SMS login comes later; the domain can be changed in config.js)
+    phoneId: function (phone) { return phone + '@' + (CFG.phoneDomain || 'phone.repricer.app'); },
+    // profile row: name, phone, city, accepted policy version
+    saveProfile: function (p) {
+      return authed('POST', '/rest/v1/profiles?on_conflict=user_id', p, { Prefer: 'resolution=merge-duplicates,return=minimal' }).then(function (r) {
+        if (!r.ok) throw { text: errText(r) };
+        return true;
+      });
+    },
+    getProfile: function () {
+      return authed('GET', '/rest/v1/profiles?select=first_name,last_name,phone,city,accepted_at,policy_version&user_id=eq.' + auth.user.id).then(function (r) {
+        if (!r.ok) throw { text: errText(r) };
+        return (r.json && r.json[0]) || null;
+      });
+    },
+    touchProfile: function (ver) {
+      return authed('PATCH', '/rest/v1/profiles?user_id=eq.' + auth.user.id, { app_version: ver, last_seen_at: new Date().toISOString() }, { Prefer: 'return=minimal' }).catch(function () {});
+    },
     deleteCloud: function () {
       return authed('DELETE', '/rest/v1/shop_state?user_id=eq.' + auth.user.id).then(function (r) {
         if (!r.ok) throw { text: errText(r) };
