@@ -1,0 +1,64 @@
+# Builds a TEST Android app (debug APK) from the website files in this repository.
+# Run it: Actions tab -> "Build Android APK" -> Run workflow. Download the APK from the finished run (Artifacts).
+name: Build Android APK
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Collect the website files
+        run: |
+          mkdir -p build/www
+          cp index.html app.js logic.js sync.js config.js templates.js card.js sw.js style.css vazirmatn.woff2 manifest.json icon-192.png icon-512.png icon-maskable-512.png build/www/
+
+      - name: Create the Android project
+        working-directory: build
+        run: |
+          npm init -y
+          npm install @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
+          npx cap init "ترازینا" ir.tarazina.app --web-dir www
+          npx cap add android
+          # do not let Android cloud-backup copy login tokens off the phone
+          sed -i 's/android:allowBackup="true"/android:allowBackup="false"/' android/app/src/main/AndroidManifest.xml
+          grep -n "allowBackup" android/app/src/main/AndroidManifest.xml
+          npx cap sync android
+
+      - name: Use the Tarazina icon (skipped if the tool is missing)
+        working-directory: build
+        run: |
+          CONV=$(command -v magick || command -v convert || true)
+          if [ -z "$CONV" ]; then echo "no ImageMagick, keeping the default icon"; exit 0; fi
+          RES=android/app/src/main/res
+          for pair in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+            d=${pair%%:*}
+            s=${pair##*:}
+            for name in ic_launcher ic_launcher_round ic_launcher_foreground; do
+              $CONV www/icon-512.png -resize ${s}x${s} $RES/mipmap-$d/$name.png
+            done
+          done
+          rm -rf $RES/mipmap-anydpi-v26
+          echo "icon replaced"
+
+      - name: Build the debug APK
+        working-directory: build/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarazina-debug-apk
+          path: build/android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
