@@ -27,12 +27,13 @@ jobs:
         working-directory: build
         run: |
           npm init -y
-          npm install @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
+          npm install @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7 @capacitor/local-notifications@7
           npx cap init "ترازینا" ir.tarazina.app --web-dir www
           npx cap add android
           # do not let Android cloud-backup copy login tokens off the phone
           sed -i 's/android:allowBackup="true"/android:allowBackup="false"/' android/app/src/main/AndroidManifest.xml
           grep -n "allowBackup" android/app/src/main/AndroidManifest.xml
+          grep -q POST_NOTIFICATIONS android/app/src/main/AndroidManifest.xml || sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <application|' android/app/src/main/AndroidManifest.xml
           npx cap sync android
 
       - name: Use the Tarazina icon (skipped if the tool is missing)
@@ -50,6 +51,12 @@ jobs:
           done
           rm -rf $RES/mipmap-anydpi-v26
           echo "icon replaced"
+          # plain teal launch screen instead of the default Capacitor logo
+          find $RES -name 'splash*.png' | while read f; do
+            dims=$(identify -format '%wx%h' "$f" 2>/dev/null || true)
+            if [ -n "$dims" ]; then $CONV -size "$dims" xc:'#0E6B6F' "$f"; fi
+          done
+          echo "launch screen replaced"
 
       - name: Build the debug APK
         working-directory: build/android
