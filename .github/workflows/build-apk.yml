@@ -36,27 +36,36 @@ jobs:
           grep -q POST_NOTIFICATIONS android/app/src/main/AndroidManifest.xml || sed -i 's|<application|<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <application|' android/app/src/main/AndroidManifest.xml
           npx cap sync android
 
-      - name: Use the Tarazina icon (skipped if the tool is missing)
+      - name: Use the Tarazina icon and launch screen
         working-directory: build
         run: |
-          CONV=$(command -v magick || command -v convert || true)
-          if [ -z "$CONV" ]; then echo "no ImageMagick, keeping the default icon"; exit 0; fi
-          RES=android/app/src/main/res
-          for pair in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
-            d=${pair%%:*}
-            s=${pair##*:}
-            for name in ic_launcher ic_launcher_round ic_launcher_foreground; do
-              $CONV www/icon-512.png -resize ${s}x${s} $RES/mipmap-$d/$name.png
-            done
-          done
-          rm -rf $RES/mipmap-anydpi-v26
-          echo "icon replaced"
+          pip install pillow
+          python3 - <<'PY'
+          import glob, os
+          from PIL import Image
+          res = 'android/app/src/main/res'
+          src = Image.open('www/icon-512.png').convert('RGBA')
+          sizes = {'mdpi': 48, 'hdpi': 72, 'xhdpi': 96, 'xxhdpi': 144, 'xxxhdpi': 192}
+          n = 0
+          for d, s in sizes.items():
+              folder = os.path.join(res, 'mipmap-' + d)
+              os.makedirs(folder, exist_ok=True)
+              for name in ('ic_launcher', 'ic_launcher_round', 'ic_launcher_foreground'):
+                  src.resize((s, s), Image.LANCZOS).save(os.path.join(folder, name + '.png'))
+                  n += 1
+          print('launcher icons written:', n)
+          # adaptive-icon xml would still show the old foreground, so remove it
+          import shutil
+          shutil.rmtree(os.path.join(res, 'mipmap-anydpi-v26'), ignore_errors=True)
           # plain teal launch screen instead of the default Capacitor logo
-          find $RES -name 'splash*.png' | while read f; do
-            dims=$(identify -format '%wx%h' "$f" 2>/dev/null || true)
-            if [ -n "$dims" ]; then $CONV -size "$dims" xc:'#0E6B6F' "$f"; fi
-          done
-          echo "launch screen replaced"
+          m = 0
+          for f in glob.glob(res + '/**/splash*.png', recursive=True):
+              w, h = Image.open(f).size
+              Image.new('RGB', (w, h), (14, 107, 111)).save(f)
+              m += 1
+          print('launch screens replaced:', m)
+          assert n == 15
+          PY
 
       - name: Build the debug APK
         working-directory: build/android
