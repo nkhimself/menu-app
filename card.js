@@ -49,8 +49,31 @@
     x.fillText(fit(x, contact, w - 140), w / 2, h - 52);
   }
 
+  // draw an image to fill a rounded box (cover)
+  function cover(x, img, dx, dy, dw, dh, rad) {
+    x.save(); x.beginPath();
+    x.moveTo(dx + rad, dy); x.arcTo(dx + dw, dy, dx + dw, dy + dh, rad); x.arcTo(dx + dw, dy + dh, dx, dy + dh, rad); x.arcTo(dx, dy + dh, dx, dy, rad); x.arcTo(dx, dy, dx + dw, dy, rad); x.closePath(); x.clip();
+    var k = Math.max(dw / img.width, dh / img.height), sw = dw / k, sh = dh / k;
+    x.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, dx, dy, dw, dh);
+    x.restore();
+  }
+  // one product with its photo (4:5 picture)
+  function singlePhoto(opt, th) {
+    var w = 1080, h = 1350, f = frame(w, h, th), x = f.x, r = opt.rows[0];
+    header(x, w, th, opt.shop, opt.sub || '');
+    cover(x, r.img, 90, 280, w - 180, 560, 36);
+    x.textAlign = 'center'; x.fillStyle = th.ink; x.font = '800 78px ' + FONT; x.fillText(fit(x, r.name || '', w - 160), w / 2, 940);
+    x.fillStyle = th.band === '#2E2538' ? th.accent : th.band;
+    x.font = '800 130px ' + FONT; x.direction = 'ltr'; x.fillText(fmt(r.price), w / 2, 1090); x.direction = 'rtl';
+    x.fillStyle = th.ink; x.font = '600 46px ' + FONT; x.fillText('تومان' + (r.unit ? '  ·  ' + r.unit : ''), w / 2, 1160);
+    var note = r.cal || r.note; if (note) { x.fillStyle = th.mute; x.font = '500 38px ' + FONT; x.fillText(fit(x, note, w - 160), w / 2, 1225); }
+    footer(x, w, h, th, opt.contact);
+    return f.c;
+  }
+
   // one product, big
   function single(opt, th) {
+    if (opt.rows[0].img) return singlePhoto(opt, th);
     var w = 1080, h = 1080, f = frame(w, h, th), x = f.x;
     header(x, w, th, opt.shop, opt.sub || '');
     x.textAlign = 'center'; x.fillStyle = th.ink;
@@ -61,7 +84,7 @@
     x.font = '800 170px ' + FONT; x.direction = 'ltr'; x.fillText(fmt(opt.rows[0].price), w / 2, 760); x.direction = 'rtl';
     x.fillStyle = th.ink; x.font = '600 52px ' + FONT;
     x.fillText('تومان' + (opt.rows[0].unit ? '  ·  ' + opt.rows[0].unit : ''), w / 2, 850);
-    if (opt.rows[0].note) { x.fillStyle = th.mute; x.font = '500 40px ' + FONT; x.fillText(fit(x, opt.rows[0].note, w - 160), w / 2, 930); }
+    var nt = opt.rows[0].cal || opt.rows[0].note; if (nt) { x.fillStyle = th.mute; x.font = '500 40px ' + FONT; x.fillText(fit(x, nt, w - 160), w / 2, 930); }
     footer(x, w, h, th, opt.contact);
     return f.c;
   }
@@ -73,17 +96,20 @@
     header(x, w, th, opt.shop, (opt.sub || 'فهرست قیمت') + (pages > 1 ? '  ·  ' + (page + 1) + '/' + pages : ''));
     rows.forEach(function (r, i) {
       var y = top + i * rowH + 56;
+      var right = w - 70;
+      if (r.img) { cover(x, r.img, w - 70 - 76, y - 58, 76, 76, 16); right = w - 70 - 76 - 18; }
       x.textAlign = 'right'; x.fillStyle = th.ink; x.font = '700 46px ' + FONT;
-      var nm = fit(x, r.name || '', 560);
-      x.fillText(nm, w - 70, y);
+      var nm = fit(x, r.name || '', r.img ? 470 : 560);
+      x.fillText(nm, right, y);
       var nw = x.measureText(nm).width;
+      if (r.cal) { x.fillStyle = th.mute; x.font = '500 26px ' + FONT; x.fillText(r.cal, right, y + 30); x.fillStyle = th.ink; }
       x.textAlign = 'left'; x.font = '800 46px ' + FONT; x.direction = 'ltr';
       var pr = fmt(r.price);
       x.fillText(pr, 70, y);
       var pw = x.measureText(pr).width;
       x.direction = 'rtl';
       x.strokeStyle = th.line; x.lineWidth = 4; x.setLineDash([2, 12]); x.lineCap = 'round';
-      x.beginPath(); x.moveTo(70 + pw + 24, y - 12); x.lineTo(w - 70 - nw - 24, y - 12); x.stroke(); x.setLineDash([]);
+      x.beginPath(); x.moveTo(70 + pw + 24, y - 12); x.lineTo(right - nw - 24, y - 12); x.stroke(); x.setLineDash([]);
     });
     x.textAlign = 'right'; x.fillStyle = th.mute; x.font = '500 34px ' + FONT;
     x.fillText('قیمت‌ها به تومان', w - 70, top + rows.length * rowH + 56);

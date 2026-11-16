@@ -12,9 +12,35 @@
   var wz = null;                        // setup wizard state
   var qc = { lines: [], other: 0, n: 1 };
   var focusSel = null;
-  var cardOpt = { theme: 'tarazina', pick: null, wholesale: false };
+  var cardOpt = { theme: 'tarazina', pick: null, wholesale: false, photos: true, cal: false };
   var urls = [];
-  var POLICY_V = '1.0', VER = '0.9.0';
+
+  // ---------- light / dark theme (device setting: auto, light or dark) ----------
+  var THEME_KEY = 'tarazina.theme';
+  function themePref() { try { return localStorage.getItem(THEME_KEY) || 'auto'; } catch (e) { return 'auto'; } }
+  function isDarkNow() { var p = themePref(); if (p === 'dark') return true; if (p === 'light') return false; try { return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches); } catch (e) { return false; } }
+  function applyTheme() {
+    var p = themePref(), r = document.documentElement;
+    if (p === 'auto') r.removeAttribute('data-theme'); else r.setAttribute('data-theme', p);
+    var dk = isDarkNow(); if (dk) r.setAttribute('data-dark', '1'); else r.removeAttribute('data-dark');
+    Array.prototype.forEach.call(document.querySelectorAll('meta[name="theme-color"]'), function (m) { m.setAttribute('content', dk ? '#101819' : '#0E6B6F'); });
+  }
+  function setTheme(p) { try { localStorage.setItem(THEME_KEY, p); } catch (e) {} applyTheme(); }
+  applyTheme();
+  try { var mq = window.matchMedia('(prefers-color-scheme: dark)'); var onMq = function () { if (themePref() === 'auto') applyTheme(); }; if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq); } catch (e) {}
+
+  // ---------- phone back button: go to the previous page instead of leaving the app ----------
+  var navSig = '', navPop = false, navFirst = true;
+  function navState() { return { tab: tab, cur: cur, step: (wz && tab === 'setup') ? wz.step : 0 }; }
+  function navTrack() {
+    var sig = tab + '|' + (cur || '') + '|' + ((wz && tab === 'setup') ? wz.step : 0);
+    if (sig !== navSig) {
+      try { if (navFirst || navPop) { if (navFirst) history.replaceState(navState(), ''); } else history.pushState(navState(), ''); } catch (e) {}
+      navSig = sig;
+    }
+    navFirst = false; navPop = false;
+  }
+  var POLICY_V = '1.0', VER = '0.10.0';
   var gf = { mode: 'up', first: '', last: '', phone: '', city: '', pass: '', agree: false, msg: '' };   // sign-up form
 
   // ---------- storage ----------
@@ -23,7 +49,7 @@
     return L.blank();
   }
   function saveLocal() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
-  function save() { saveLocal(); if (S && S.user()) { S.markDirty(); scheduleSync(); } }
+  function save() { saveLocal(); if (S && S.user()) { S.markDirty(); scheduleSync(); } notifSoon(); }
   function now() { return Date.now(); }
   function touch(o) { o.u = now(); return o; }
   function touchSettings() { state.su = now(); }
@@ -96,7 +122,7 @@
   // ---------- titles ----------
   function titleOf() {
     var w = W();
-    var t = { prods: w.many, prod: w.one, ings: 'مواد اولیه', packs: 'بسته‌بندی', quick: 'قیمت سریع', setup: 'راه‌اندازی', chg: 'ثبت قیمت جدید', res: 'پیشنهاد قیمت', cards: 'کارت و فهرست قیمت', sub: 'جایگزین‌ها', set: 'تنظیمات', acc: 'حساب', help: 'راهنما', waste: 'ضایعات قابل فروش', debts: 'بدهی و طلب', labels: 'برچسب و ارزش غذایی', label: 'ساخت برچسب', policy: 'سیاست‌ها و شرایط', gate: gf.mode === 'in' ? 'ورود' : (gateMode() === 'prof' ? 'تکمیل مشخصات' : 'ساخت حساب') };
+    var t = { prods: w.many, prod: w.one, ings: 'مواد اولیه', packs: 'بسته‌بندی', quick: 'قیمت سریع', setup: 'راه‌اندازی', chg: 'ثبت قیمت جدید', res: 'پیشنهاد قیمت', cards: 'کارت و فهرست قیمت', sub: 'جایگزین‌ها', set: 'تنظیمات', acc: 'حساب', help: 'راهنما', waste: 'ضایعات قابل فروش', shop: 'لیست خرید', sales: 'ثبت فروش', debts: 'بدهی و طلب', labels: 'برچسب و ارزش غذایی', label: 'ساخت برچسب', policy: 'سیاست‌ها و شرایط', gate: gf.mode === 'in' ? 'ورود' : (gateMode() === 'prof' ? 'تکمیل مشخصات' : 'ساخت حساب') };
     return t[tab] || NAME;
   }
 
@@ -267,6 +293,8 @@
     var dn = donut(p);
     if (dn) h += '<div class="sec"><h3>هزینه از چه چیزی است؟</h3>' + dn + '</div>';
 
+    h += photoSection(it) + nutSection(it);
+
     // scaling
     if ((it.lines || []).length) {
       h += '<div class="sec"><h3>مقیاس دسته</h3><p class="hintline">برای وقتی که بیشتر یا کمتر از یک دستور می‌پزید. چیزی ذخیره نمی‌شود.</p>' +
@@ -327,7 +355,7 @@
       h += '<div style="margin-top:8px"><span class="lbl">قیمت ' + UNIT[g.unit] + '</span>' + numField('ing-price', g.price, ' aria-label="قیمت"', true) + '</div>';
     }
     if (showSw('loss')) h += '<div style="margin-top:4px"><span class="lbl">ضایعات (%) مثل پوست، استخوان، پرت</span>' + numField('ing-loss', g.loss || '', ' max="90" placeholder="0"') + '</div>';
-    h += '<div class="rowx" style="margin-top:4px;align-items:center;justify-content:space-between"><label class="switch"><input type="checkbox" data-f="ing-trim"' + (g.trimmable !== false ? ' checked' : '') + '> مقدارش قابل کم‌کردن باشد</label><span>' + ch + '</span></div></div>';
+    h += '<div class="rowx" style="margin-top:4px;align-items:center;justify-content:space-between"><label class="switch"><input type="checkbox" data-f="ing-trim"' + (g.trimmable !== false ? ' checked' : '') + '> مقدارش قابل کم‌کردن باشد</label><span>' + ch + '</span></div>' + ingNutHtml(g) + '</div>';
     return h;
   }
   function ingList() {
@@ -392,7 +420,6 @@
   function wzPick(id) {
     var t = T.types.filter(function (x) { return x.id === id; })[0]; if (!t) return;
     wz.type = id; wz.ing = {}; wz.pk = {}; wz.dish = {};
-    t.ing.forEach(function (k) { wz.ing[k] = true; });
     if (id === 'other') { wz.csw = { loss: false, batch: false, sizes: false, weight: false }; }
   }
   function viewSetup() {
@@ -418,7 +445,8 @@
       return h;
     }
     if (wz.step === 2) {
-      h += lead('مواد و بسته‌بندی', 'آنچه می‌خرید را نگه دارید و آخرین قیمت خرید را بنویسید. می‌توانید قیمت را خالی بگذارید و بعداً پر کنید.') + steps;
+      h += lead('مواد و بسته‌بندی', 'این‌ها فقط پیشنهاد است و بعداً هر وقت خواستید می‌توانید تغییرشان دهید. برای شروع چند مورد را انتخاب کنید، یا بدون انتخاب روی «ادامه» بزنید.') + steps;
+      h += '<button class="btn sm" style="margin:0 0 12px" data-act="wz-all">انتخاب همهٔ مواد</button> <button class="btn sm" style="margin:0 0 12px" data-act="wz-none">برداشتن همه</button>';
       if (t.hint) h += '<div class="note">' + esc(t.hint) + '</div>';
       h += '<div class="sec"><h3>مواد اولیه</h3>';
       t.ing.forEach(function (k) {
@@ -588,6 +616,7 @@
       '<div><label class="lbl" for="shopcontact">تماس یا آیدی (پایین کارت)</label><input id="shopcontact" data-f="contact" value="' + esc(s.contact) + '" placeholder="مثلاً @mybakery  |  0915..." dir="ltr" style="text-align:right"></div>' +
       '<div><span class="lbl">رنگ</span><div class="themes">' + Object.keys(CARD.themes).map(function (k) { return '<button data-act="theme" data-k="' + k + '" class="' + (cardOpt.theme === k ? 'on' : '') + '">' + CARD.themes[k].name + '</button>'; }).join('') + '</div></div>';
     if (full()) h += '<label class="switch"><input type="checkbox" data-f="card-whole"' + (cardOpt.wholesale ? ' checked' : '') + '> به‌جای قیمت فروش، قیمت عمده را بگذار</label>';
+    h += '<label class="switch"><input type="checkbox" data-f="card-photos"' + (cardOpt.photos ? ' checked' : '') + '> عکس محصول روی کارت بیاید (اگر عکس دارد)</label><label class="switch"><input type="checkbox" data-f="card-cal"' + (cardOpt.cal ? ' checked' : '') + '> کالری هر محصول زیر نامش بیاید (اگر ارزش غذایی مواد نوشته شده)</label>';
     h += '</div><div class="sec"><h3>کدام موارد در فهرست باشند؟</h3>';
     state.items.forEach(function (it) {
       var p = cardOpt.wholesale ? L.num(it.wholesale) : L.num(it.price);
@@ -597,12 +626,12 @@
     return h;
   }
   function cardRows(ids) {
-    return ids.map(function (id) { var it = find(state.items, id); if (!it) return null; var p = cardOpt.wholesale && ids.length > 1 ? L.num(it.wholesale) : L.num(it.price); return p > 0 ? { name: it.name, price: p, unit: it.mode === 'kg' ? 'هر کیلوگرم' : '' } : null; }).filter(Boolean);
+    return ids.map(function (id) { var it = find(state.items, id); if (!it) return null; var p = cardOpt.wholesale && ids.length > 1 ? L.num(it.wholesale) : L.num(it.price); return p > 0 ? { id: it.id, name: it.name, price: p, unit: it.mode === 'kg' ? 'هر کیلوگرم' : '', cal: cardOpt.cal ? calTxt(it) : '' } : null; }).filter(Boolean);
   }
   function makeCard(kind, rows, sub) {
     if (!rows.length) { alert('قیمتی برای نمایش نیست.'); return; }
     var s = state.settings;
-    CARD.make({ kind: kind, shop: s.shopName || NAME, contact: s.contact, theme: cardOpt.theme, sub: sub, rows: rows }).then(function (cv) {
+    loadImgs(rows).then(function () { return CARD.make({ kind: kind, shop: s.shopName || NAME, contact: s.contact, theme: cardOpt.theme, sub: sub, rows: rows }); }).then(function (cv) {
       return Promise.all(cv.map(CARD.toBlob));
     }).then(function (blobs) {
       closeSheet(); window._cardName = 'price-card'; urls = blobs.map(function (b) { return URL.createObjectURL(b); });
@@ -632,6 +661,8 @@
     h += '<div class="sec stack"><h3>همه یکی</h3><p class="mute" style="margin:0">اگر برای بعضی مورد‌ها هدف جداگانه گذاشته‌اید (' + nOv + ' مورد)، با این دکمه همه از هدف بالا استفاده می‌کنند.</p><button class="btn block" data-act="apply-target"' + (nOv ? '' : ' disabled') + '>هدف بالا برای همه</button></div>';
     h += '<div class="sec stack"><h3>بخش‌های اضافه</h3>' + [['loss', 'ضایعات مواد'], ['batch', 'یک دستور چند عدد می‌شود'], ['sizes', 'اندازه‌ها (کوچک و بزرگ)'], ['weight', 'فروش وزنی (کیلویی)']].map(function (a) { return '<label class="switch"><input type="checkbox" data-f="st-sw" data-k="' + a[0] + '"' + (s.sw[a[0]] ? ' checked' : '') + '> ' + a[1] + '</label>'; }).join('') + '</div>';
     h += '<div class="sec stack"><h3>نوع کسب‌وکار</h3><p style="margin:0"><b>' + esc(t ? (t.id === 'other' && state.profile.customName ? state.profile.customName : t.n) : 'انتخاب نشده') + '</b></p><button class="btn block" data-act="go-setup">تغییر نوع و افزودن مواد آماده</button></div>';
+    h += '<div class="sec stack"><h3>ظاهر برنامه</h3><div class="seg">' + [['auto', 'خودکار'], ['light', 'روشن'], ['dark', 'تیره']].map(function (m) { return '<button data-act="theme-' + m[0] + '" class="' + (themePref() === m[0] ? 'on' : '') + '">' + m[1] + '</button>'; }).join('') + '</div><p class="mute" style="margin:0">«خودکار» از تنظیم گوشی پیروی می‌کند. با دکمهٔ ماه و خورشید بالای منو هم می‌توانید عوض کنید.</p></div>';
+    h += notifSettingHtml();
     h += '<div class="sec stack"><h3>اطلاعات</h3>' +
       '<button class="btn block" data-act="export">دریافت پشتیبان (فایل)</button>' +
       '<label class="btn block">بازیابی از فایل<input type="file" accept=".json" data-f="import" hidden></label>' +
@@ -654,7 +685,10 @@
       ['6. قیمت عوض شد', 'از منو «ثبت قیمت جدید مواد» را بزنید. برنامه نشان می‌دهد کدام محصول‌ها گران‌تر شد.'],
       ['7. کارت قیمت', 'از منو «کارت و فهرست قیمت» برای ساخت تصویر آمادهٔ اینستاگرام و بله.'],
       ['8. بدهی و طلب', 'از منو «بدهی و طلب» اسم شخص، مبلغ و تاریخ موعد را بنویسید. وقتی موعد نزدیک شود، بالای صفحهٔ اصلی یادآوری می‌آید. برنامه پیامک خودکار نمی‌فرستد؛ فقط وقتی برنامه را باز کنید یادآوری می‌کند.'],
-      ['9. برچسب و ارزش غذایی', 'از منو «برچسب و ارزش غذایی» مواد و گرم هر کدام را بنویسید و ارزش غذایی هر ماده را از روی بسته یا فهرست آماده پر کنید. برنامه جدول ارزش غذایی را حساب می‌کند. این مقدار محاسبه‌ای است، نه آزمایشگاهی؛ قبل از چاپ، با قوانین برچسب‌گذاری و اداره‌ای که برای مجوز دارید تطبیق دهید.']
+      ['9. برچسب و ارزش غذایی', 'از منو «برچسب و ارزش غذایی» مواد و گرم هر کدام را بنویسید و ارزش غذایی هر ماده را از روی بسته یا فهرست آماده پر کنید. برنامه جدول ارزش غذایی را حساب می‌کند. این مقدار محاسبه‌ای است، نه آزمایشگاهی؛ قبل از چاپ، با قوانین برچسب‌گذاری و اداره‌ای که برای مجوز دارید تطبیق دهید.'],
+      ['10. لیست خرید', 'هر چیزی که می‌خواهید بخرید را بنویسید. اگر اسمش یکی از مواد شما باشد، قیمتش خودکار می‌آید. از «برنامهٔ تولید» هم می‌توانید مواد لازم برای ساختن تعداد مشخصی محصول را بگیرید.'],
+      ['11. ثبت فروش', 'هنگام فروش روی + بزنید یا آخر روز تعداد فروش را یک‌جا بنویسید. سود و فروش روز و هفته را می‌بینید.'],
+      ['12. عکس و کالری', 'در صفحهٔ هر محصول می‌توانید عکس بگذارید تا روی کارت بیاید. ارزش غذایی هر ماده را در «مواد اولیه» بنویسید تا کالری و پروتئین محصول حساب شود.']
     ];
     return lead('راهنما', 'کوتاه و قدم‌به‌قدم') + '<div class="sec">' + steps.map(function (a) { return '<p style="margin:0 0 12px"><b>' + a[0] + '</b><br><span class="mute">' + a[1] + '</span></p>'; }).join('') + '</div>' +
       '<div class="sec"><h3>حالت ساده و کامل</h3><p class="mute" style="margin:0">در حالت ساده فقط مواد و بسته‌بندی حساب می‌شود. در حالت کامل (از تنظیمات) دستمزد، سربار و قیمت عمده هم اضافه می‌شود.</p></div>' +
@@ -955,6 +989,227 @@
     }).catch(function () { alert('ساخت تصویر ممکن نشد.'); });
   }
 
+
+  // ======================================================= photos of menu items (kept on this phone only)
+  var Photos = (function () {
+    var db = null;
+    function open() {
+      return new Promise(function (res, rej) {
+        if (db) return res(db);
+        try {
+          var r = indexedDB.open('tarazina-photos', 1);
+          r.onupgradeneeded = function () { r.result.createObjectStore('p'); };
+          r.onsuccess = function () { db = r.result; res(db); };
+          r.onerror = function () { rej(r.error); };
+        } catch (e) { rej(e); }
+      });
+    }
+    function tx(mode, fn) {
+      return open().then(function (d) {
+        return new Promise(function (res, rej) {
+          var t = d.transaction('p', mode), rq = fn(t.objectStore('p'));
+          t.oncomplete = function () { res(rq && rq.result); }; t.onerror = function () { rej(t.error); }; t.onabort = function () { rej(t.error); };
+        });
+      });
+    }
+    return { put: function (id, b) { return tx('readwrite', function (s) { return s.put(b, id); }); }, get: function (id) { return tx('readonly', function (s) { return s.get(id); }); }, del: function (id) { return tx('readwrite', function (s) { return s.delete(id); }); } };
+  })();
+  function resizePhoto(file) {
+    return new Promise(function (res, rej) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var k = Math.min(1, 900 / Math.max(img.width, img.height)), cv = document.createElement('canvas');
+        cv.width = Math.max(1, Math.round(img.width * k)); cv.height = Math.max(1, Math.round(img.height * k));
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height); URL.revokeObjectURL(url);
+        cv.toBlob(function (b) { b ? res(b) : rej(new Error('blob')); }, 'image/jpeg', 0.82);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); rej(new Error('img')); };
+      img.src = url;
+    });
+  }
+  var photoUrl = '';
+  function photoSection(it) {
+    return '<div class="sec"><h3>عکس ' + esc(W().one) + '</h3><div id="photobox"><p class="mute" style="margin:0 0 8px">بدون عکس. عکس روی کارت اینستاگرام هم می‌آید.</p></div>' +
+      '<label class="btn block">' + ICON('card') + 'انتخاب یا گرفتن عکس<input type="file" accept="image/*" data-f="photo-in" hidden></label>' +
+      '<button class="btn danger block" id="photodel" data-act="photo-del" style="margin-top:8px" hidden>حذف عکس</button>' +
+      '<p class="mute sm" style="margin:8px 0 0">عکس‌ها فقط روی همین گوشی می‌مانند؛ در پشتیبان و ابر نیستند.</p></div>';
+  }
+  function paintPhoto() {
+    if (tab !== 'prod' || !cur || !document.getElementById('photobox')) return;
+    var id = cur;
+    Photos.get(id).then(function (b) {
+      var bx = document.getElementById('photobox'), del = document.getElementById('photodel'); if (!bx || cur !== id) return;
+      if (!b) { if (del) del.hidden = true; return; }
+      if (photoUrl) { try { URL.revokeObjectURL(photoUrl); } catch (e) {} }
+      photoUrl = URL.createObjectURL(b); bx.innerHTML = '<img class="photoprev" alt="عکس محصول" src="' + photoUrl + '">'; if (del) del.hidden = false;
+    }).catch(function () {});
+  }
+  function loadImgs(rows) {
+    if (!cardOpt.photos) return Promise.resolve(rows);
+    return Promise.all(rows.map(function (r) {
+      return Photos.get(r.id).then(function (b) {
+        if (!b) return;
+        return new Promise(function (res) { var im = new Image(); im.onload = function () { r.img = im; res(); }; im.onerror = function () { res(); }; im.src = URL.createObjectURL(b); });
+      }).catch(function () {});
+    })).then(function () { return rows; });
+  }
+
+  // ======================================================= nutrition of ingredients and menu items
+  function nutVal(key, v) { return key === 'k' || key === 'na' ? String(Math.round(v)) : fn1(v); }
+  var openNut = {};
+  function ingNutHtml(g) {
+    var n = g.nut || {};
+    return '<details' + (openNut[g.id] ? ' open' : '') + '><summary data-nut="1">ارزش غذایی (اختیاری)</summary>' +
+      '<select data-f="ing-pre" aria-label="فهرست تقریبی"><option value="">پر کردن از فهرست تقریبی...</option>' + PRE.map(function (p, i) { return '<option value="' + i + '">' + p[0] + '</option>'; }).join('') + '</select>' +
+      '<div class="nut">' + NUTF.map(function (f) { return '<div><span class="lbl">' + f[1] + '</span><input type="number" min="0" step="any" inputmode="decimal" data-f="ing-n" data-k="' + f[0] + '" value="' + (n[f[0]] || '') + '"></div>'; }).join('') + '</div>' +
+      (g.unit === 'piece' ? '<div style="margin-top:8px"><span class="lbl">وزن هر عدد (گرم)</span>' + numField('ing-pg', g.pg || '', ' aria-label="وزن هر عدد"') + '</div>' : '') +
+      '<p class="hintline">مقدار در 100 گرم (یا 100 میلی‌لیتر) ماده؛ از روی بستهٔ آن بنویسید. فهرست تقریبی دقیق نیست.</p></details>';
+  }
+  function nutSection(it) {
+    var nu = L.itemNutrition(it, state), h = '<div class="sec"><h3>ارزش غذایی (اختیاری)</h3>';
+    if (!nu.has) return h + '<p class="mute" style="margin:0">ارزش غذایی هر ماده را در «مواد اولیه» (بخش ارزش غذایی زیر هر ماده) بنویسید تا اینجا جدول کالری، پروتئین و چربی این محصول ساخته شود.</p></div>';
+    var kg = nu.mode === 'kg';
+    h += '<table class="tbl"><tr><th></th><th>' + (kg ? 'در هر کیلوگرم' : 'در هر عدد' + (nu.unitG > 0 ? ' (حدود ' + Math.round(nu.unitG) + ' گرم)' : '')) + '</th><th>در 100 گرم</th></tr>' +
+      NUTF.map(function (f) { return '<tr><td>' + f[1] + '</td><td>' + nutVal(f[0], nu.perUnit[f[0]]) + '</td><td>' + nutVal(f[0], kg ? nu.perUnit[f[0]] / 10 : nu.per100[f[0]]) + '</td></tr>'; }).join('') + '</table>';
+    if (nu.missing.length) h += '<div class="note warn">برای این مواد ارزش غذایی (یا وزن هر عدد) نوشته نشده و در جدول حساب نشده‌اند: ' + nu.missing.map(esc).join('، ') + '</div>';
+    return h + '<p class="mute sm">محاسبه از روی ارزش غذایی مواد است، نه آزمایشگاه. برای مواد لیتری هر میلی‌لیتر یک گرم حساب شده و وزن، قبل از پخت است.</p><button class="btn block" data-act="lb-from-item">ساخت برچسب از این محصول</button></div>';
+  }
+  function lbLine(g, amount) {
+    var n = g.nut || {}, gr = g.unit === 'piece' ? (L.num(g.pg) > 0 ? amount * L.num(g.pg) : 0) : amount;
+    return { name: g.name, g: gr, k: L.num(n.k), f: L.num(n.f), s: L.num(n.s), c: L.num(n.c), su: L.num(n.su), p: L.num(n.p), na: L.num(n.na) };
+  }
+  function labelFromItem(it) {
+    var nu = L.itemNutrition(it, state), b = { id: uid(), name: it.name, net: 0, serv: it.mode === 'piece' ? Math.round(nu.unitG) : 0, fin: 0, lines: [], alg: {}, may: '', prod: state.settings.shopName || '', contact: state.settings.contact || '', shelf: '', store: '', u: now() };
+    (it.lines || []).forEach(function (l) { var g = find(state.ingredients, l.ingId); if (g) b.lines.push(lbLine(g, L.num(l.amount))); });
+    state.labels.push(b); cur = b.id; tab = 'label';
+  }
+  function calTxt(it) {
+    var nu = L.itemNutrition(it, state); if (!nu.has || !(nu.perUnit.k > 0)) return '';
+    return nu.mode === 'kg' ? Math.round(nu.perUnit.k / 10) + ' کالری در 100 گرم' : Math.round(nu.perUnit.k) + ' کالری';
+  }
+
+  // ======================================================= shopping list
+  var planQ = {};
+  function viewShop() {
+    var h = lead('لیست خرید', 'هر چیزی که می‌خواهید بخرید را بنویسید. اگر اسمش یکی از مواد اولیه‌تان باشد و قیمتش را نوشته باشید، همان قیمت حساب می‌شود؛ وگرنه می‌توانید بدون قیمت هم ادامه دهید.');
+    h += '<datalist id="ingnames">' + state.ingredients.map(function (g) { return '<option value="' + esc(g.name) + '">'; }).join('') + '</datalist>';
+    if (!state.shop.length) return h + empty('لیست خالی است', 'مثلاً «آرد» یا «جعبهٔ کیک». یا از برنامهٔ تولید بگیرید که برای ساختن تعداد مشخصی محصول چه چیزهایی لازم است.', [['sh-add', 'افزودن به لیست', true], ['sh-plan', 'ساخت از برنامهٔ تولید']]);
+    var tt = L.shopTotals(state);
+    h += '<div class="sums"><div><small>جمع تقریبی (خریده‌نشده‌ها)</small><b>' + fmt(tt.total) + '</b></div><div><small>بدون قیمت</small><b style="direction:rtl">' + tt.unknown + ' مورد</b></div></div>';
+    state.shop.forEach(function (x) {
+      var ing = x.ingId && find(state.ingredients, x.ingId), unit = ing ? ing.unit : (x.unit || ''), eff = L.shopPrice(x, state), line = eff > 0 && x.qty > 0 ? eff * x.qty : 0;
+      h += '<div class="item' + (x.done ? ' bought' : '') + '" data-id="' + x.id + '"><div class="rowx"><label class="switch" style="margin-top:8px"><input type="checkbox" data-f="sh-done"' + (x.done ? ' checked' : '') + ' aria-label="خریده شد"></label><div class="grow"><input class="nm" data-f="sh-name" list="ingnames" value="' + esc(x.name) + '" placeholder="چه چیزی؟" aria-label="نام"></div><button class="x" data-act="sh-del" aria-label="حذف">' + ICON('trash') + '</button></div>' +
+        '<div class="grid2" style="margin-top:8px"><div><span class="lbl">مقدار' + (unit ? ' (' + UNAME[unit] + ')' : '') + '</span>' + numField('sh-qty', x.qty || '', ' aria-label="مقدار"') + '</div>' +
+        '<div><span class="lbl">قیمت هر ' + (unit ? UNAME[unit] : 'واحد') + ' (اختیاری)</span>' + numField('sh-price', x.price || '', ' aria-label="قیمت" placeholder="' + (ing && L.num(ing.price) > 0 ? fmt(ing.price) : '') + '"', true) + '</div></div>' +
+        (ing ? '' : '<div style="margin-top:8px"><span class="lbl">واحد</span><select data-f="sh-unit" aria-label="واحد"><option value="">—</option>' + [['kg', 'کیلوگرم'], ['l', 'لیتر'], ['piece', 'عدد']].map(function (u) { return '<option value="' + u[0] + '"' + (x.unit === u[0] ? ' selected' : '') + '>' + u[1] + '</option>'; }).join('') + '</select></div>') +
+        '<p class="mute sm" style="margin:8px 0 0">' + (line > 0 ? 'جمع: <b style="color:var(--ink)">' + fmt(line) + '</b> تومان' + (ing && !(x.price > 0) ? ' (با قیمت ماده)' : '') : 'بدون قیمت') + '</p></div>';
+    });
+    return h + '<button class="btn pri block" data-act="sh-add">' + ICON('plus') + 'افزودن به لیست</button><div class="grid2" style="margin-top:10px"><button class="btn" data-act="sh-plan">برنامهٔ تولید</button><button class="btn" data-act="sh-share">' + ICON('share') + 'متن لیست</button></div>' +
+      '<button class="btn block" style="margin-top:10px" data-act="sh-clear">پاک کردن خریده‌شده‌ها</button>';
+  }
+  function shopText() {
+    return 'لیست خرید\n' + state.shop.filter(function (x) { return !x.done && x.name; }).map(function (x) {
+      var ing = x.ingId && find(state.ingredients, x.ingId), unit = ing ? ing.unit : x.unit;
+      return '- ' + x.name + (x.qty ? ' — ' + (Math.round(x.qty * 1000) / 1000) + (unit ? ' ' + UNAME[unit] : '') : '');
+    }).join('\n');
+  }
+  function planSheet() {
+    if (!state.items.length) { alert('اول یک محصول بسازید.'); return; }
+    planQ = {};
+    openSheet('<div class="sheet" role="dialog" aria-label="برنامهٔ تولید"><h3>برنامهٔ تولید</h3><p class="mute" style="margin-top:0">از هر محصول چند عدد (یا چند کیلو) می‌خواهید بسازید؟ مواد لازم، با ضایعات، به لیست خرید اضافه می‌شود.</p>' +
+      state.items.map(function (it) { return '<div class="sl-row"><div class="tx">' + esc(it.name || '(بدون نام)') + '<small>' + (it.mode === 'kg' ? 'کیلوگرم' : 'عدد') + '</small></div><input type="number" min="0" step="any" inputmode="decimal" style="width:100px" data-plan="' + it.id + '" aria-label="تعداد"></div>'; }).join('') +
+      '<button class="btn pri block" style="margin-top:12px" data-sheet="plan-go">افزودن به لیست خرید</button><button class="btn block" data-sheet="close" style="margin-top:10px">بستن</button></div>');
+  }
+  function planGo() {
+    var need = L.planNeeds(state, planQ);
+    if (!need.length) { alert('تعداد هیچ محصولی نوشته نشده.'); return; }
+    need.forEach(function (n) {
+      var ex = state.shop.filter(function (x) { return x.ingId === n.ingId && !x.done; })[0], q = Math.round(n.qty * 1000) / 1000;
+      if (ex) { ex.qty = Math.round((L.num(ex.qty) + q) * 1000) / 1000; touch(ex); }
+      else state.shop.push({ id: uid(), name: n.name, ingId: n.ingId, unit: n.unit, qty: q, price: 0, done: false, u: now() });
+    });
+    closeSheet(); save(); render();
+  }
+
+  // ======================================================= daily sales log
+  var salesDay = '';
+  function viewSales() {
+    var today = isoOf(new Date()); if (!salesDay) salesDay = today;
+    var h = lead('ثبت فروش روزانه', 'هنگام فروش روی + بزنید، یا آخر روز تعداد فروش هر محصول را یک‌جا بنویسید. سود با قیمت فروش و هزینهٔ همان زمان حساب می‌شود.');
+    if (!state.items.length) return h + empty('هنوز محصولی ندارید', 'اول محصول بسازید و قیمت فروشش را بنویسید.', [['go-prods', 'رفتن به ' + W().many, true]]);
+    h += '<div class="daynav"><button class="btn sm" data-act="sl-prev">روز قبل</button><b>' + (salesDay === today ? 'امروز · ' : '') + jShow(salesDay) + '</b><button class="btn sm" data-act="sl-next"' + (salesDay >= today ? ' disabled' : '') + '>روز بعد</button></div>';
+    if (salesDay !== today) h += '<button class="btn sm block" style="margin:-4px 0 12px" data-act="sl-today">برگشت به امروز</button>';
+    var d = L.salesSummary(state, salesDay, salesDay);
+    h += '<div class="sums"><div class="g"><small>فروش این روز</small><b>' + fmt(d.rev) + '</b></div><div class="' + (d.profit >= 0 ? 'g' : 'r') + '"><small>سود تقریبی</small><b>' + fmt(d.profit) + '</b></div></div>';
+    h += '<div class="sec">';
+    state.items.forEach(function (it) {
+      var rec = find(state.sales, 'sl_' + salesDay + '_' + it.id), q = rec ? rec.qty : 0;
+      h += '<div class="sl-row"><div class="tx">' + esc(it.name || '(بدون نام)') + '<small>' + (L.num(it.price) > 0 ? fmt(it.price) + ' تومان ' + unitWord(it) : 'قیمت فروش را در محصول بنویسید') + '</small></div>' +
+        '<div class="cnt"><button data-act="sl-minus" data-k="' + it.id + '" aria-label="کم">−</button><input type="number" min="0" step="any" inputmode="decimal" data-f="sl-qty" data-k="' + it.id + '" value="' + (q || '') + '" placeholder="0" aria-label="تعداد فروش"><button class="p" data-act="sl-plus" data-k="' + it.id + '" aria-label="زیاد">+</button></div></div>';
+    });
+    h += '</div>';
+    var days = [], i; for (i = 0; i < 7; i++) { var dd = new Date(); dd.setDate(dd.getDate() - i); days.push(isoOf(dd)); }
+    var w7 = L.salesSummary(state, days[6], days[0]), m = new Date(); m.setDate(m.getDate() - 29); var m30 = L.salesSummary(state, isoOf(m), today);
+    h += '<div class="sec"><h3>خلاصه</h3><table class="tbl"><tr><th></th><th>فروش</th><th>سود تقریبی</th></tr><tr><td>7 روز اخیر</td><td>' + fmt(w7.rev) + '</td><td>' + fmt(w7.profit) + '</td></tr><tr><td>30 روز اخیر</td><td>' + fmt(m30.rev) + '</td><td>' + fmt(m30.profit) + '</td></tr></table>' +
+      '<table class="tbl" style="margin-top:12px">' + days.map(function (iso) { var s = L.salesSummary(state, iso, iso); return '<tr><td>' + jShow(iso) + '</td><td>' + fmt(s.rev) + '</td><td>' + fmt(s.profit) + '</td></tr>'; }).join('') + '</table>' +
+      '<p class="mute sm" style="margin:8px 0 0">سود = فروش منهای هزینهٔ مواد و بسته‌بندی (و دستمزد در حالت کامل). اگر بعداً قیمت یا هزینه را عوض کنید و همان روز را دوباره ویرایش کنید، عدد آن روز با قیمت جدید حساب می‌شود.</p></div>';
+    return h;
+  }
+  function setSale(itemId, qty) {
+    var it = find(state.items, itemId); if (!it) return;
+    var id = 'sl_' + salesDay + '_' + itemId, rec = find(state.sales, id); qty = Math.max(0, qty);
+    if (qty === 0) { if (rec) { gone(id); state.sales = state.sales.filter(function (x) { return x.id !== id; }); } return; }
+    if (!rec) { rec = { id: id, date: salesDay, itemId: itemId, name: it.name, qty: 0, price: 0, cost: 0, u: now() }; state.sales.push(rec); }
+    rec.qty = qty; rec.name = it.name; rec.price = L.num(it.price); rec.cost = L.unitCost(it, C()); touch(rec);
+  }
+
+  // ======================================================= phone notifications for due debts (installed Android app only)
+  var LNp;
+  function getLN() {
+    if (LNp !== undefined) return LNp;
+    LNp = null;
+    try { var Cp = window.Capacitor; if (Cp && Cp.isNativePlatform && Cp.isNativePlatform() && Cp.registerPlugin) LNp = Cp.registerPlugin('LocalNotifications'); } catch (e) { LNp = null; }
+    return LNp;
+  }
+  function notifId(s) { var h = 7; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h) % 2000000000; }
+  function syncNotifs() {
+    var LN = getLN(); if (!LN) return Promise.resolve();
+    return LN.getPending().then(function (p) {
+      var ids = (p.notifications || []).map(function (n) { return { id: n.id }; });
+      return ids.length ? LN.cancel({ notifications: ids }) : null;
+    }).then(function () {
+      if (!state.settings.debtNotify) return;
+      var list = [];
+      state.debts.forEach(function (d) {
+        if (dDone(d) || !d.due || L.num(d.amount) <= 0) return;
+        var p = isoParts(d.due), at = new Date(p[0], p[1] - 1, p[2], 9, 0, 0);
+        if (at.getTime() <= Date.now()) return;
+        list.push({ id: notifId(d.id), title: d.dir === 'owe' ? 'موعد پرداخت بدهی' : 'موعد دریافت طلب', body: (d.name || '') + ' · ' + fmt(dRem(d)) + ' تومان', schedule: { at: at } });
+      });
+      if (list.length) return LN.schedule({ notifications: list });
+    }).catch(function () {});
+  }
+  var notifT = null;
+  function notifSoon() { if (!getLN()) return; clearTimeout(notifT); notifT = setTimeout(syncNotifs, 800); }
+  function setNotify(on) {
+    var LN = getLN(); if (!LN) return;
+    if (!on) { state.settings.debtNotify = false; touchSettings(); save(); render(); return; }
+    LN.requestPermissions().then(function (r) {
+      var ok = !!(r && r.display === 'granted'); state.settings.debtNotify = ok; state.settings.debtAsked = true; touchSettings(); save(); render();
+      if (!ok) alert('اجازهٔ اعلان داده نشد. از تنظیمات گوشی برای این برنامه اعلان‌ها را روشن کنید.');
+    }).catch(function () { state.settings.debtNotify = false; touchSettings(); save(); render(); alert('روشن کردن اعلان ممکن نشد.'); });
+  }
+  function askNotif() {
+    if (!getLN() || state.settings.debtAsked) return;
+    state.settings.debtAsked = true; touchSettings(); saveLocal();
+    openSheet('<div class="sheet" role="dialog" aria-label="یادآوری روی گوشی"><h3>یادآوری روی گوشی؟</h3><p class="mute" style="margin-top:0">می‌خواهید صبح روز موعد هر بدهی یا طلب یک اعلان روی گوشی بیاید؟ بعداً از تنظیمات هم می‌توانید روشن یا خاموش کنید.</p><button class="btn pri block" data-sheet="notif-yes">بله، روشن شود</button><button class="btn block" style="margin-top:10px" data-sheet="notif-no">نه، فعلاً نه</button></div>');
+  }
+  function notifSettingHtml() {
+    var h = '<div class="sec stack"><h3>یادآوری بدهی و طلب روی گوشی</h3>';
+    if (!getLN()) return h + '<p class="mute" style="margin:0">این بخش فقط در برنامهٔ نصب‌شدهٔ اندروید کار می‌کند.</p></div>';
+    return h + '<label class="switch" style="color:var(--ink)"><input type="checkbox" data-f="st-notify"' + (state.settings.debtNotify ? ' checked' : '') + '> صبح روز موعد (ساعت 9) یک اعلان بفرست</label><p class="mute sm" style="margin:0">اعلان ممکن است چند دقیقه دیرتر برسد. اگر نیامد، در تنظیمات گوشی اعلان‌های این برنامه را روشن کنید.</p></div>';
+  }
+
   // ======================================================= sign-up gate and policies
   var CITIES = ['مشهد', 'تهران', 'اصفهان', 'شیراز', 'تبریز', 'کرج', 'قم', 'اهواز', 'کرمانشاه', 'ارومیه', 'رشت', 'زاهدان', 'کرمان', 'همدان', 'یزد', 'اردبیل', 'بندرعباس', 'اراک', 'زنجان', 'سنندج', 'قزوین', 'خرم‌آباد', 'گرگان', 'ساری', 'بجنورد', 'بیرجند', 'نیشابور', 'سبزوار', 'قوچان', 'بوشهر', 'ایلام', 'سمنان', 'شهرکرد', 'یاسوج', 'کاشان'];
   function gateMode() {
@@ -985,7 +1240,7 @@
       '<div><label class="lbl" for="gf-phone">شمارهٔ موبایل</label><input id="gf-phone" data-f="gf-phone" dir="ltr" inputmode="tel" autocomplete="tel" placeholder="09123456789" value="' + esc(gf.phone) + '"></div>' +
       '<div><label class="lbl" for="gf-city">شهر</label><input id="gf-city" data-f="gf-city" list="gf-cities" autocomplete="address-level2" value="' + esc(gf.city) + '"><datalist id="gf-cities">' + CITIES.map(function (c) { return '<option value="' + c + '">'; }).join('') + '</datalist></div>' +
       (prof ? '' : '<div><label class="lbl" for="gf-pass">رمز عبور (حداقل 8 کاراکتر)</label><input id="gf-pass" data-f="gf-pass" type="password" dir="ltr" autocomplete="new-password" value="' + esc(gf.pass) + '"></div>') +
-      '<label class="switch" style="align-items:flex-start"><input type="checkbox" data-f="gf-agree"' + (gf.agree ? ' checked' : '') + '> <span>سیاست حفظ حریم خصوصی و شرایط استفاده را خوانده‌ام و می‌پذیرم، و موافقم که اطلاعاتی که در برنامه وارد می‌کنم دیده و طبق آن سیاست‌ها استفاده شود. <a href="#" data-act="go-policy">خواندن سیاست‌ها</a></span></label>' +
+      '<label class="switch agree"><input type="checkbox" data-f="gf-agree"' + (gf.agree ? ' checked' : '') + '> <span>قوانین را می‌پذیرم. <a href="#" data-act="go-policy">خواندن سیاست‌ها</a></span></label>' +
       (gf.msg ? '<div class="note warn">' + esc(gf.msg) + '</div>' : '') +
       '<button class="btn pri block" id="gf-btn" data-act="' + (prof ? 'gf-prof' : 'gf-up') + '"' + (gf.agree ? '' : ' disabled') + '>' + (prof ? 'ذخیره و ادامه' : 'ساخت حساب') + '</button>' +
       (prof ? '' : '<button class="btn block" data-act="gf-mode-in">قبلاً ثبت‌نام کرده‌ام؛ ورود</button>') + '</div>';
@@ -1068,7 +1323,7 @@
   }
 
   // ======================================================= render
-  var VIEWS = { debts: viewDebts, labels: viewLabels, label: viewLabel, waste: viewWaste, gate: viewGate, policy: viewPolicy, prods: viewProds, prod: viewProd, ings: viewIngs, packs: viewPacks, quick: viewQuick, setup: viewSetup, chg: viewChg, res: viewRes, cards: viewCards, sub: viewSub, set: viewSet, acc: viewAcc, help: viewHelp };
+  var VIEWS = { shop: viewShop, sales: viewSales, debts: viewDebts, labels: viewLabels, label: viewLabel, waste: viewWaste, gate: viewGate, policy: viewPolicy, prods: viewProds, prod: viewProd, ings: viewIngs, packs: viewPacks, quick: viewQuick, setup: viewSetup, chg: viewChg, res: viewRes, cards: viewCards, sub: viewSub, set: viewSet, acc: viewAcc, help: viewHelp };
   var rendering = false;
   function render() {
     if (rendering) { setTimeout(render, 0); return; }
@@ -1085,6 +1340,8 @@
     var np = document.querySelector('#nav-prods span'); if (np) np.textContent = W().many;
     document.body.classList.toggle('nonav', (tab === 'setup' && !state.profile.done) || !!gm);
     Array.prototype.forEach.call(document.querySelectorAll('.appname'), function (e) { e.textContent = NAME; });
+    navTrack();
+    if (tab === 'prod') paintPhoto();
     if (focusSel) { var el = document.querySelector(focusSel); focusSel = null; if (el) { try { el.focus(); el.scrollIntoView({ block: 'center' }); } catch (e) {} } }
   }
   function go(t, id) { tab = t; if (id) cur = id; render(); window.scrollTo(0, 0); }
@@ -1185,9 +1442,14 @@
     else if (a === 'new-price') { closeSheet(); go('chg'); }
     else if (a === 'card-send') { var bl = window._cardBlobs; if (bl) CARD.send(bl, window._cardName || 'price-card'); }
     else if (a === 'db-share' || a === 'db-copy') { var ta = document.getElementById('dbtxt'); if (!ta) return; var tx = ta.value; if (a === 'db-share' && navigator.share) { try { navigator.share({ text: tx }).catch(function () {}); return; } catch (er) {} } copyText(tx, ta); }
-    else if (a === 'new-debt') { closeSheet(); newDebt(); save(); render(); window.scrollTo(0, 0); }
+    else if (a === 'new-debt') { closeSheet(); newDebt(); save(); render(); window.scrollTo(0, 0); setTimeout(askNotif, 300); }
+    else if (a === 'plan-go') planGo();
+    else if (a === 'notif-yes') { closeSheet(); setNotify(true); }
+    else if (a === 'notif-no') { closeSheet(); }
     else if (a === 'new-label') { closeSheet(); newLabel(); save(); render(); window.scrollTo(0, 0); }
   });
+
+  document.getElementById('sheetwrap').addEventListener('input', function (e) { var t = e.target, pid = t.getAttribute && t.getAttribute('data-plan'); if (pid) planQ[pid] = Number(t.value); });
 
   var view = document.getElementById('view');
   // show the formatted amount under price fields while typing; live search; scale slider
@@ -1207,6 +1469,27 @@
     var rowEl = closest(t, '[data-id]'), id = rowEl && rowEl.getAttribute('data-id');
     var lineEl = closest(t, '[data-line]'), li = lineEl ? Number(lineEl.getAttribute('data-line')) : -1;
     var n = Number(t.value), k = t.getAttribute('data-k');
+    if (f === 'st-notify') { setNotify(t.checked); return; }
+    if (f === 'card-photos') { cardOpt.photos = t.checked; return; }
+    if (f === 'card-cal') { cardOpt.cal = t.checked; return; }
+    if (f === 'photo-in') {
+      var pf = t.files && t.files[0]; if (!pf || !cur) return;
+      resizePhoto(pf).then(function (b) { return Photos.put(cur, b); }).then(function () { render(); }).catch(function () { alert('ذخیرهٔ عکس ممکن نشد.'); });
+      return;
+    }
+    if (f === 'sl-qty') { setSale(k, Math.max(0, n)); save(); render(); return; }
+    if (f.indexOf('sh-') === 0) {
+      var sx = find(state.shop, id); if (!sx) return;
+      if (f === 'sh-name') { sx.name = t.value; var nm = t.value.trim(), mg = state.ingredients.filter(function (g) { return (g.name || '').trim() === nm; })[0]; if (mg) { sx.ingId = mg.id; sx.unit = mg.unit; } else sx.ingId = null; }
+      else if (f === 'sh-qty') sx.qty = Math.max(0, n); else if (f === 'sh-price') sx.price = Math.max(0, n); else if (f === 'sh-unit') sx.unit = t.value; else if (f === 'sh-done') sx.done = t.checked;
+      touch(sx); save(); render(); return;
+    }
+    if (f === 'ing-pre' || f === 'ing-n' || f === 'ing-pg') {
+      var gi = find(state.ingredients, id); if (!gi) return; gi.nut = gi.nut || {};
+      if (f === 'ing-pre') { var pp0 = PRE[Number(t.value)]; if (!pp0) return; ['k', 'f', 's', 'c', 'su', 'p', 'na'].forEach(function (kk, i3) { gi.nut[kk] = pp0[i3 + 1]; }); }
+      else if (f === 'ing-n') gi.nut[k] = Math.max(0, n); else gi.pg = Math.max(0, n);
+      touch(gi); save(); render(); return;
+    }
     if (f.indexOf('q-') === 0 || f === 'scale') return;
     if (f.indexOf('gf-') === 0) { if (f === 'gf-agree') { gf.agree = t.checked; var gb = document.getElementById('gf-btn'); if (gb) gb.disabled = !gf.agree; } else gf[f.slice(3)] = t.value; return; }
     // wizard fields (no saving)
@@ -1251,7 +1534,7 @@
       else if (f === 'lb-pre') { var pp = PRE[Number(t.value)]; if (!pp) return; var ln = lb.lines[li]; if (!ln.name) ln.name = pp[0]; ['k', 'f', 's', 'c', 'su', 'p', 'na'].forEach(function (kk, i2) { ln[kk] = pp[i2 + 1]; }); }
       else if (f === 'lb-from') {
         var src = find(state.items, t.value); if (!src) return;
-        src.lines.forEach(function (ln0) { var g0 = find(state.ingredients, ln0.ingId); if (!g0) return; lb.lines.push({ name: g0.name, g: g0.unit === 'piece' ? 0 : L.num(ln0.amount), k: 0, f: 0, s: 0, c: 0, su: 0, p: 0, na: 0 }); });
+        src.lines.forEach(function (ln0) { var g0 = find(state.ingredients, ln0.ingId); if (!g0) return; lb.lines.push(lbLine(g0, L.num(ln0.amount))); });
         if (!lb.name) lb.name = src.name;
       }
       touch(lb); save(); render(); return;
@@ -1309,6 +1592,8 @@
   });
 
   view.addEventListener('click', function (e) {
+    var smm = closest(e.target, 'summary[data-nut]');
+    if (smm) { var rw0 = closest(smm, '[data-id]'); if (rw0) openNut[rw0.getAttribute('data-id')] = !smm.parentNode.open; return; }
     var a = closest(e.target, 'a[data-act]'); if (a) e.preventDefault();
     var b = closest(e.target, '[data-act]'); if (!b) return;
     var act = b.getAttribute('data-act'), k = b.getAttribute('data-k');
@@ -1322,6 +1607,14 @@
     if (act.indexOf('db-f-') === 0) { dbf = act.slice(5); render(); return; }
     if (act === 'lb-open') { go('label', id); return; }
     // wizard
+    if (/^theme-(auto|light|dark)$/.test(act)) { setTheme(act.slice(6)); render(); return; }
+    if (act === 'sl-prev' || act === 'sl-next') { var sd = isoParts(salesDay || isoOf(new Date())), dt = new Date(sd[0], sd[1] - 1, sd[2] + (act === 'sl-next' ? 1 : -1)); salesDay = isoOf(dt); render(); return; }
+    if (act === 'sl-today') { salesDay = isoOf(new Date()); render(); return; }
+    if (act === 'sl-plus' || act === 'sl-minus') { var rc = find(state.sales, 'sl_' + salesDay + '_' + k), q0 = rc ? rc.qty : 0; setSale(k, q0 + (act === 'sl-plus' ? 1 : -1)); save(); render(); return; }
+    if (act === 'photo-del') { Photos.del(cur).catch(function () {}).then(function () { render(); }); return; }
+    if (act === 'sh-plan') { planSheet(); return; }
+    if (act === 'sh-share') { openSheet('<div class="sheet" role="dialog" aria-label="متن لیست"><h3>متن لیست خرید</h3><textarea id="dbtxt" rows="8">' + esc(shopText()) + '</textarea><button class="btn pri block" style="margin-top:12px" data-sheet="db-share">' + ICON('share') + 'ارسال</button><button class="btn block" data-sheet="db-copy">' + ICON('copy') + 'کپی</button><button class="btn block" data-sheet="close">بستن</button></div>'); return; }
+    if (act === 'wz-all' || act === 'wz-none') { var tt = T.types.filter(function (x) { return x.id === wz.type; })[0]; if (tt) tt.ing.forEach(function (kk) { wz.ing[kk] = act === 'wz-all'; }); render(); return; }
     if (act === 'wz-next') { if (wz.step === 1 && !wz.type) return; wz.step++; render(); window.scrollTo(0, 0); return; }
     if (act === 'wz-back') { wz.step = Math.max(1, wz.step - 1); render(); window.scrollTo(0, 0); return; }
     if (act === 'wz-finish') { if (!wzFinish()) return; tab = 'prods'; save(); render(); window.scrollTo(0, 0); return; }
@@ -1345,14 +1638,18 @@
     else if (act === 'pkg-add') newPack();
     else if (act === 'ing-del') { if (!confirm('حذف شود؟')) return; delIng(id); }
     else if (act === 'pkg-del') { if (!confirm('حذف شود؟')) return; delPack(id); }
-    else if (act === 'it-del') { if (!it || !confirm('حذف شود؟')) return; gone(it.id); state.items = state.items.filter(function (x) { return x.id !== it.id; }); tab = 'prods'; }
+    else if (act === 'it-del') { if (!it || !confirm('حذف شود؟')) return; gone(it.id); Photos.del(it.id).catch(function () {}); state.items = state.items.filter(function (x) { return x.id !== it.id; }); tab = 'prods'; }
     else if (act === 'it-dup') { if (!it) return; var cp = JSON.parse(JSON.stringify(it)); cp.id = uid(); cp.name = (it.name || '') + ' (کپی)'; cp.u = now(); state.items.push(cp); cur = cp.id; focusSel = '[data-f="it-name"]'; }
     else if (act === 'it-mode-piece') { if (it) { it.mode = 'piece'; touch(it); } }
     else if (act === 'it-mode-kg') { if (it) { it.mode = 'kg'; touch(it); } }
     else if (act === 'sample-del') { if (!confirm('همهٔ نمونه‌های آماده و مواد آن‌ها حذف شوند؟')) return; deleteSamples(); }
     else if (act === 'ws-add') { state.wastes.push({ id: uid(), name: '', unit: 'kg', price: 0, u: now() }); }
     else if (act === 'ws-del') { if (!confirm('حذف شود؟')) return; gone(id); state.wastes = state.wastes.filter(function (x) { return x.id !== id; }); state.items.forEach(function (x) { var n0 = (x.waste || []).length; x.waste = (x.waste || []).filter(function (l) { return l.wasteId !== id; }); if (x.waste.length !== n0) touch(x); }); }
-    else if (act === 'db-add') newDebt();
+    else if (act === 'sh-add') { state.shop.push({ id: uid(), name: '', ingId: null, unit: '', qty: 0, price: 0, done: false, u: now() }); tab = 'shop'; focusSel = '.item:last-of-type [data-f="sh-name"]'; }
+    else if (act === 'sh-del') { gone(id); state.shop = state.shop.filter(function (x) { return x.id !== id; }); }
+    else if (act === 'sh-clear') { if (!state.shop.some(function (x) { return x.done; })) { alert('موردی علامت نخورده است.'); return; } state.shop.forEach(function (x) { if (x.done) gone(x.id); }); state.shop = state.shop.filter(function (x) { return !x.done; }); }
+    else if (act === 'lb-from-item') { if (it) labelFromItem(it); }
+    else if (act === 'db-add') { newDebt(); setTimeout(askNotif, 300); }
     else if (act === 'db-del') { if (!confirm('حذف شود؟')) return; gone(id); state.debts = state.debts.filter(function (x) { return x.id !== id; }); }
     else if (act === 'db-dir-owed' || act === 'db-dir-owe') { var d1 = find(state.debts, id); if (d1) { d1.dir = act === 'db-dir-owe' ? 'owe' : 'owed'; touch(d1); } }
     else if (act === 'db-settle') { var d2 = find(state.debts, id); if (d2) { d2.paid = d2.amount; touch(d2); } }
@@ -1378,7 +1675,7 @@
     else if (act === 'reset') {
       if (!confirm('همهٔ داده‌ها پاک شود؟' + (S && S.user() ? ' (اگر وارد حساب هستید، نسخهٔ ابری هم پاک می‌شود.)' : ''))) return;
       var dd = state.del || {}, t0 = now();
-      [].concat(state.ingredients, state.packs, state.items, state.subs, state.wastes, state.debts, state.labels).forEach(function (x) { dd[x.id] = t0; });   // so a merge cannot bring them back
+      [].concat(state.ingredients, state.packs, state.items, state.subs, state.wastes, state.debts, state.labels, state.shop, state.sales).forEach(function (x) { dd[x.id] = t0; });   // so a merge cannot bring them back
       state = L.blank(); state.su = t0; state.del = dd; wz = null; tab = 'setup';
     }
     else if (act === 'mode-simple') { state.settings.mode = 'simple'; touchSettings(); }
@@ -1396,16 +1693,59 @@
     else if (act === 'copy') { var ta = document.getElementById('sharetxt'); ta.select(); try { document.execCommand('copy'); } catch (er) {} if (navigator.clipboard) { try { navigator.clipboard.writeText(ta.value); } catch (er) {} } return; }
     else return;
     save(); render();
-    if (act === 'new-item' || act === 'it-dup' || act === 'lb-add') window.scrollTo(0, 0);
+    if (act === 'new-item' || act === 'it-dup' || act === 'lb-add' || act === 'lb-from-item') window.scrollTo(0, 0);
   });
 
   window.addEventListener('online', function () { if (S && S.user() && S.meta().dirty) syncNow(0); });
   // weekly reminder also when the app is opened again
   document.addEventListener('visibilitychange', function () { if (!document.hidden && (tab === 'prods' || tab === 'ings' || tab === 'chg')) render(); });
   paintStat();
+
+  // back button
+  window.addEventListener('popstate', function (e) {
+    var sw = document.getElementById('sheetwrap');
+    if (!sw.hidden || document.body.classList.contains('open')) {
+      if (!sw.hidden) closeSheet(); else drawer(false);
+      try { history.pushState(navState(), ''); } catch (x) {}      // keep the current page; the back press only closed the layer on top
+      return;
+    }
+    var st = e.state; if (!st || !st.tab) return;
+    navPop = true; tab = st.tab; cur = st.cur || cur;
+    if (st.tab === 'setup') { if (!wz) wzStart(); if (st.step) wz.step = st.step; }
+    render(); window.scrollTo(0, 0);
+  });
+  // swipe from right to left opens the menu, left to right closes it
+  (function () {
+    var sx = 0, sy = 0, st = 0, bad = false;
+    function blocked(el) {
+      while (el && el !== document.body) {
+        var tg = el.tagName;
+        if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT' || tg === 'TABLE') return true;
+        if (el.scrollWidth > el.clientWidth + 4) { var ox = getComputedStyle(el).overflowX; if (ox === 'auto' || ox === 'scroll') return true; }
+        el = el.parentNode;
+      }
+      return false;
+    }
+    document.addEventListener('touchstart', function (e) {
+      if (e.touches.length !== 1) { bad = true; return; }
+      var t = e.touches[0]; sx = t.clientX; sy = t.clientY; st = Date.now(); bad = blocked(e.target);
+    }, { passive: true });
+    document.addEventListener('touchend', function (e) {
+      if (bad || !e.changedTouches.length) return;
+      var t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+      if (Date.now() - st > 700 || Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) * 0.6) return;
+      if (!document.getElementById('sheetwrap').hidden || document.body.classList.contains('gated')) return;
+      var open = document.body.classList.contains('open');
+      if (dx < 0 && !open) drawer(true); else if (dx > 0 && open) drawer(false);
+    }, { passive: true });
+  })();
+  document.getElementById('themeBtn').addEventListener('click', function () { setTheme(isDarkNow() ? 'light' : 'dark'); render(); });
   render();
   if (S && S.user() && navigator.onLine !== false) reconcile(false);
 })();
+
+// tap to skip the opening animation
+(function () { var sp = document.getElementById('splash'); if (sp) sp.addEventListener('click', function () { sp.style.display = 'none'; }); })();
 
 // offline support (registered here so the page needs no inline script)
 if ('serviceWorker' in navigator) { window.addEventListener('load', function () { try { navigator.serviceWorker.register('sw.js').catch(function () {}); } catch (e) {} }); }

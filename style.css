@@ -7,12 +7,20 @@
   --drawer:#0A3A3D;--drawer-ink:#E6F2F2;--drawer-mute:#8FB3B4;
   --r-lg:20px;--r-md:14px;--r-sm:10px;
 }
-@media (prefers-color-scheme:dark){:root{
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
   --paper:#101819;--surface:#172324;--surface2:#1F2F30;--ink:#E6EEEE;--mute:#9DB0B1;--line:#2A3D3E;
   --brand:#5CC8C9;--brand-ink:#04292B;--brand-soft:#143538;
   --ok:#47C78F;--bad:#FF8C75;--warn:#E8B352;--bad-soft:#3A1F1A;--ok-soft:#16352A;
   --drawer:#0B1314;
+  color-scheme:dark;
 }}
+:root[data-theme=dark]{
+  --paper:#101819;--surface:#172324;--surface2:#1F2F30;--ink:#E6EEEE;--mute:#9DB0B1;--line:#2A3D3E;
+  --brand:#5CC8C9;--brand-ink:#04292B;--brand-soft:#143538;
+  --ok:#47C78F;--bad:#FF8C75;--warn:#E8B352;--bad-soft:#3A1F1A;--ok-soft:#16352A;
+  --drawer:#0B1314;
+  color-scheme:dark;
+}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--paper);color:var(--ink);font:400 15.5px/1.75 "Vazirmatn",Tahoma,"Segoe UI",sans-serif;min-height:100vh}
@@ -259,3 +267,41 @@ body.gated #menuBtn,body.gated #syncstat{visibility:hidden}
 .warnbox{background:color-mix(in srgb,var(--saffron) 24%,var(--surface));border-radius:var(--r-md);padding:12px 14px;font-size:13.5px;margin:12px 0}
 .algs{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px}
 #tabs,.brand,.drawer-foot{flex:none}
+
+/* ---- opening animation: the "t" is drawn, the dot lands on the beam, the scale settles, the name is written ---- */
+#splash{position:fixed;inset:0;z-index:100;background:#0E6B6F;display:flex;flex-direction:column;align-items:center;justify-content:center;animation:sOut .45s ease 3.1s forwards}
+#splash svg{width:min(56vw,250px);height:auto;overflow:visible}
+.s-t{stroke-dasharray:340;stroke-dashoffset:340;animation:sDraw .6s cubic-bezier(.4,0,.2,1) .15s forwards}
+.s-beam{transform-box:fill-box;transform-origin:center;opacity:0;animation:sBeamIn .3s ease .7s forwards,sWobble .8s ease-in-out 1.45s forwards}
+.s-dot{transform-box:fill-box;transform-origin:center;opacity:0;animation:sDot .5s cubic-bezier(.3,.7,.3,1) 1s forwards}
+.s-name{margin-top:16px;padding:8px 6px;font:800 46px/1.4 "Vazirmatn",Tahoma,sans-serif;color:#fff;clip-path:inset(-14px -6px -14px 100%);animation:sWrite .7s cubic-bezier(.5,0,.2,1) 1.9s forwards}
+.s-lat{margin-top:2px;font:600 17px "Vazirmatn",Tahoma,sans-serif;letter-spacing:7px;padding-left:7px;color:#F2A71B;direction:ltr;opacity:0;animation:sFade .5s ease 2.4s forwards}
+@keyframes sDraw{to{stroke-dashoffset:0}}
+@keyframes sBeamIn{from{opacity:0;transform:rotate(-9deg) scaleX(.3)}to{opacity:1;transform:rotate(-9deg) scaleX(1)}}
+@keyframes sWobble{0%{transform:rotate(-9deg)}30%{transform:rotate(6deg)}55%{transform:rotate(-3deg)}78%{transform:rotate(1.2deg)}100%{transform:rotate(0)}}
+@keyframes sDot{0%{opacity:0;transform:translate(130px,-190px) scale(.5)}20%{opacity:1}100%{opacity:1;transform:translate(0,0) scale(1)}}
+@keyframes sWrite{to{clip-path:inset(-14px -6px -14px -6px)}}
+@keyframes sFade{to{opacity:1}}
+@keyframes sOut{to{opacity:0;visibility:hidden}}
+@media (prefers-reduced-motion:reduce){#splash{display:none}}
+
+/* theme toggle in the menu */
+.brand .icon-btn{margin-inline-start:auto;color:var(--drawer-ink)}
+.brand .icon-btn:active{background:rgba(255,255,255,.1)}
+#themeBtn .t-sun{display:none}
+html[data-dark] #themeBtn .t-sun{display:block}
+html[data-dark] #themeBtn .t-moon{display:none}
+.switch.agree{font-size:14px;color:var(--ink);align-items:center}
+.switch.agree input{width:32px;height:32px;border-radius:8px;flex:none}
+.item.bought .nm{text-decoration:line-through;opacity:.55}
+.sl-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.sl-row:first-of-type{border-top:0}
+.sl-row .tx{flex:1;min-width:0;font-weight:600}
+.sl-row .tx small{display:block;color:var(--mute);font-weight:500;font-size:12.5px}
+.cnt{display:flex;align-items:center;gap:6px}
+.cnt button{width:42px;height:42px;border-radius:50%;border:2px solid var(--line);background:transparent;font-size:22px;font-weight:700;cursor:pointer;color:var(--ink)}
+.cnt button.p{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
+.cnt input{width:64px;text-align:center;padding:6px}
+.daynav{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.daynav b{flex:1;text-align:center}
+.photoprev{width:100%;max-height:220px;object-fit:cover;border-radius:14px;display:block;margin-bottom:8px}

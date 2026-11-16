@@ -13,11 +13,11 @@
   // ---------- state shape ----------
   function blank() {
     return {
-      v: 2, ingredients: [], packs: [], items: [], subs: [], wastes: [], debts: [], labels: [],
+      v: 2, ingredients: [], packs: [], items: [], subs: [], wastes: [], debts: [], labels: [], shop: [], sales: [],
       profile: { type: '', customName: '', done: false },
       settings: { targetFC: 30, minPortion: 85, roundTo: 5000, elasticity: 1.2, qualityDrop: 3,
         mode: 'simple', wage: 0, overheadPct: 0, remindDays: 7, shopName: '', contact: '',
-        sw: { loss: false, batch: false, sizes: false, weight: false } },
+        sw: { loss: false, batch: false, sizes: false, weight: false }, debtNotify: false, debtAsked: false },
       meta: { setupSeconds: null, setups: 0, priceUpdates: 0, lastPriceUpdate: null },
       su: 0, del: {}
     };
@@ -44,6 +44,13 @@
       x = copy(x); x.u = num(x.u); x.amount = Math.max(0, num(x.amount)); x.paid = Math.max(0, num(x.paid));
       x.dir = x.dir === 'owe' ? 'owe' : 'owed'; x.due = /^\d{4}-\d{2}-\d{2}$/.test(x.due || '') ? x.due : ''; x.name = x.name || ''; return x;
     });
+    d.shop = (s.shop || []).map(function (x) {
+      x = copy(x); x.u = num(x.u); x.qty = Math.max(0, num(x.qty)); x.price = Math.max(0, num(x.price)); x.done = !!x.done; x.name = x.name || ''; x.unit = x.unit || ''; return x;
+    });
+    d.sales = (s.sales || []).map(function (x) {
+      x = copy(x); x.u = num(x.u); x.qty = Math.max(0, num(x.qty)); x.price = num(x.price); x.cost = num(x.cost);
+      x.date = /^\d{4}-\d{2}-\d{2}$/.test(x.date || '') ? x.date : ''; return x;
+    }).filter(function (x) { return x.date; });
     d.labels = (s.labels || []).map(function (b) {
       b = copy(b); b.u = num(b.u); b.net = num(b.net); b.serv = num(b.serv); b.fin = num(b.fin); b.alg = b.alg || {};
       b.lines = (b.lines || []).map(function (l) { l.name = l.name || ''; NUT_KEYS.concat(['g']).forEach(function (k) { l[k] = num(l[k]); }); return l; });
@@ -103,6 +110,8 @@
     out.wastes = mergeList(a.wastes, b.wastes, a.del, b.del);
     out.debts = mergeList(a.debts, b.debts, a.del, b.del);
     out.labels = mergeList(a.labels, b.labels, a.del, b.del);
+    out.shop = mergeList(a.shop, b.shop, a.del, b.del);
+    out.sales = mergeList(a.sales, b.sales, a.del, b.del);
     var newer = num(b.su) > num(a.su) ? b : a;
     out.settings = copy(newer.settings); out.profile = copy(newer.profile); out.su = Math.max(num(a.su), num(b.su));
     out.meta = copy(a.meta);
@@ -348,7 +357,61 @@
     return { sumG: sumG, fin: fin, per100: per100, serv: serv, servings: num(lb.serv) > 0 && num(lb.net) > 0 ? num(lb.net) / num(lb.serv) : 0 };
   }
 
-  return { labelCalc: labelCalc, wasteCredit: wasteCredit, num: num, blank: blank, normalize: normalize, cleanup: cleanup, mergeStates: mergeStates, sameData: sameData,
+  // nutrition of one menu item from its ingredients (each ingredient may carry g.nut per 100 g and g.pg = grams of one piece)
+  function itemNutrition(item, state) {
+    var ing = buildMap(state), c = ctx(state), tot = {}, grams = 0, missing = [];
+    NUT_KEYS.forEach(function (k) { tot[k] = 0; });
+    (item.lines || []).forEach(function (l) {
+      var g = ing[l.ingId]; if (!g) return;
+      var a = num(l.amount), gr = a;
+      if (g.unit === 'piece') { gr = num(g.pg) > 0 ? a * num(g.pg) : 0; if (a > 0 && !(gr > 0) && missing.indexOf(g.name + ' (وزن هر عدد)') < 0) missing.push(g.name + ' (وزن هر عدد)'); }
+      grams += gr;
+      var n = g.nut || {}, has = NUT_KEYS.some(function (k) { return num(n[k]) > 0; });
+      if (!has) { if (a > 0 && missing.indexOf(g.name) < 0) missing.push(g.name); return; }
+      NUT_KEYS.forEach(function (k) { tot[k] += gr * num(n[k]) / 100; });
+    });
+    var d = divisor(item, c), per100 = {}, perUnit = {};
+    NUT_KEYS.forEach(function (k) { per100[k] = grams > 0 ? tot[k] / grams * 100 : 0; perUnit[k] = tot[k] / d; });
+    var unitG = item.mode === 'kg' ? 1000 : (grams / d);
+    return { has: (item.lines || []).length > 0 && missing.length < (item.lines || []).length, complete: (item.lines || []).length > 0 && missing.length === 0, missing: missing, grams: grams, perUnit: perUnit, per100: per100, unitG: unitG, mode: item.mode === 'kg' ? 'kg' : 'piece' };
+  }
+  function salesSummary(state, from, to) {
+    var rev = 0, cost = 0, qty = 0;
+    (state.sales || []).forEach(function (s) { if (s.date >= from && s.date <= to) { qty += num(s.qty); rev += num(s.qty) * num(s.price); cost += num(s.qty) * num(s.cost); } });
+    return { qty: qty, rev: rev, cost: cost, profit: rev - cost };
+  }
+  // price of a shopping-list line: its own price, else the price of the linked ingredient (per kg / l / piece)
+  function shopPrice(x, state) {
+    if (num(x.price) > 0) return num(x.price);
+    var g = x.ingId && buildMap(state)[x.ingId]; return g ? num(g.price) : 0;
+  }
+  function shopTotals(state) {
+    var total = 0, unknown = 0, ing = buildMap(state);
+    (state.shop || []).forEach(function (x) {
+      if (x.done) return;
+      var p = num(x.price) > 0 ? num(x.price) : (x.ingId && ing[x.ingId] ? num(ing[x.ingId].price) : 0);
+      if (p > 0 && num(x.qty) > 0) total += p * num(x.qty); else unknown++;
+    });
+    return { total: total, unknown: unknown };
+  }
+  // what to buy to make `plan` = {itemId: pieces (or kg)}; amounts in kg / l / pieces, waste included
+  function planNeeds(state, plan) {
+    var c = ctx(state), need = {}, order = [];
+    (state.items || []).forEach(function (it) {
+      var n = num(plan[it.id]); if (!(n > 0)) return;
+      var batches = n / divisor(it, c);
+      (it.lines || []).forEach(function (l) {
+        var g = c.ing[l.ingId]; if (!g) return;
+        var amt = num(l.amount) * batches * lossFactor(g);
+        var base = g.unit === 'piece' ? amt : amt / 1000;
+        if (!(l.ingId in need)) { need[l.ingId] = 0; order.push(l.ingId); }
+        need[l.ingId] += base;
+      });
+    });
+    return order.map(function (id) { var g = c.ing[id]; return { ingId: id, name: g.name, unit: g.unit, qty: need[id], cost: need[id] * num(g.price) }; });
+  }
+
+  return { itemNutrition: itemNutrition, salesSummary: salesSummary, shopPrice: shopPrice, shopTotals: shopTotals, planNeeds: planNeeds, NUT_KEYS: NUT_KEYS, labelCalc: labelCalc, wasteCredit: wasteCredit, num: num, blank: blank, normalize: normalize, cleanup: cleanup, mergeStates: mergeStates, sameData: sameData,
     buildMap: buildMap, packMap: packMap, ctx: ctx, lineCost: lineCost, batchIng: batchIng, labour: labour,
     divisor: divisor, packCost: packCost, parts: parts, unitCost: unitCost, itemTarget: itemTarget, roundUp: roundUp,
     suggest: suggest, explain: explain, keepPlan: keepPlan, scenarios: scenarios, sizeRows: sizeRows,

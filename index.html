@@ -13,6 +13,15 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 </head>
 <body>
+<div id="splash" aria-hidden="true">
+  <svg viewBox="96 80 320 340" role="presentation">
+    <path class="s-t" d="M256 110 V326 a58 58 0 0 0 58 58 H336" fill="none" stroke="#FFFFFF" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+    <g class="s-beam"><rect x="138" y="158" width="236" height="88" rx="44" fill="#0E6B6F" stroke="#FFFFFF" stroke-width="22"/><line x1="194" y1="184" x2="194" y2="220" stroke="#FFFFFF" stroke-width="11" stroke-linecap="round"/><line x1="318" y1="184" x2="318" y2="220" stroke="#FFFFFF" stroke-width="11" stroke-linecap="round"/></g>
+    <circle class="s-dot" cx="256" cy="202" r="21" fill="#F2A71B"/>
+  </svg>
+  <div class="s-name">ترازینا</div>
+  <div class="s-lat">Tarazina</div>
+</div>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
   <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></symbol>
   <symbol id="i-res" viewBox="0 0 24 24"><path d="M4 20h16M7 20v-7M12 20V6M17 20v-10"/></symbol>
@@ -32,6 +41,10 @@
   <symbol id="i-calc" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M8.5 7.5h7M9 12h.01M12 12h.01M15 12h.01M9 16h.01M12 16h.01M15 16h.01"/></symbol>
   <symbol id="i-debt" viewBox="0 0 24 24"><path d="M4 8h14a2 2 0 0 1 2 2v9H6a2 2 0 0 1-2-2zM4 8l11-4v4M16 14h.01"/></symbol>
   <symbol id="i-label" viewBox="0 0 24 24"><path d="M3 12V4h8l10 10-8 8zM7.5 8h.01"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-cart" viewBox="0 0 24 24"><path d="M3 4h2l2.2 10.5h10.6L20 7H6.2M9 19.5h.01M17 19.5h.01"/></symbol>
+  <symbol id="i-sales" viewBox="0 0 24 24"><path d="M4 20h16M6 16l4-5 3 3 5-7M15 7h3v3"/></symbol>
   <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.6 2.2c-.7.4-1.1.9-1.1 1.8M12 17h.01"/></symbol>
   <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 3v12M7 8l5-5 5 5M5 14v6h14v-6"/></symbol>
   <symbol id="i-back" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
@@ -49,7 +62,7 @@
 
 <div id="scrim"></div>
 <aside id="drawer" aria-label="منوی برنامه">
-  <div class="brand"><img src="icon-192.png" alt=""><div><b class="appname">ترازینا</b><span id="who">بدون حساب</span></div></div>
+  <div class="brand"><img src="icon-192.png" alt=""><div><b class="appname">ترازینا</b><span id="who">بدون حساب</span></div><button class="icon-btn" id="themeBtn" aria-label="تغییر حالت روشن و تاریک"><svg class="ico t-moon"><use href="#i-moon"/></svg><svg class="ico t-sun"><use href="#i-sun"/></svg></button></div>
   <nav id="tabs">
     <div class="grp">شروع</div>
     <button data-tab="setup"><svg class="ico"><use href="#i-start"/></svg>نوع کسب‌وکار و راه‌اندازی</button>
@@ -58,6 +71,8 @@
     <button data-tab="res"><svg class="ico"><use href="#i-res"/></svg>پیشنهاد قیمت همهٔ محصولات</button>
     <button data-tab="debts"><svg class="ico"><use href="#i-debt"/></svg>بدهی و طلب (یادآوری)</button>
     <button data-tab="labels"><svg class="ico"><use href="#i-label"/></svg>برچسب و ارزش غذایی</button>
+    <button data-tab="shop"><svg class="ico"><use href="#i-cart"/></svg>لیست خرید</button>
+    <button data-tab="sales"><svg class="ico"><use href="#i-sales"/></svg>ثبت فروش روزانه</button>
     <button data-tab="cards"><svg class="ico"><use href="#i-card"/></svg>کارت و فهرست قیمت برای شبکه‌های اجتماعی</button>
     <div class="grp">اطلاعات شما</div>
     <button data-tab="waste"><svg class="ico"><use href="#i-waste"/></svg>ضایعات قابل فروش</button>
@@ -67,7 +82,7 @@
     <button data-tab="acc"><svg class="ico"><use href="#i-acc"/></svg>حساب و ذخیره در ابر</button>
     <button data-tab="help"><svg class="ico"><use href="#i-help"/></svg>راهنما</button>
   </nav>
-  <div class="drawer-foot">نسخهٔ آزمایشی 0.9.0</div>
+  <div class="drawer-foot">نسخهٔ آزمایشی 0.10.0</div>
 </aside>
 
 <main id="view"></main>
